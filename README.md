@@ -1,6 +1,35 @@
-#Behavioral Economics 
+=====================================================================
+ CAPITAL DEEP DIVE -> POWER BI   |   Power Query code, final version
+=====================================================================
+
+HOW TO USE
+- Every query is created the same way:
+  Nuova origine > Query vuota > Editor avanzato > Ctrl+A > paste/type > Fine > rename it.
+- Lines starting with // are comments. You can skip them when typing.
+- Keep the existing query "Workbook" (the Excel.Workbook(...) one). Don't change it.
+- Delete the old queries fnGetBlock and Config / BlockConfig once the new ones work.
+
+QUERY LIST (left panel, final state)
+  Workbook            (exists)            load OFF
+  fnReadSheet         function            -
+  fnReadList          function            -
+  BlockConfig         config table        load OFF
+  CheckBlocks         debug table         load OFF
+  FactData            main fact table     load ON
+  DimItem             item sort order     load ON
+  DimPeriod           period sort order   load ON
+  List_...            optional lists      load ON (only the ones you need)
+
+ORDER TO CREATE THEM
+  1 fnReadSheet  2 BlockConfig  3 CheckBlocks  (check it!)  4 FactData
+  5 DimItem  6 DimPeriod  7 fnReadList + List_ queries (optional)
 
 
+=====================================================================
+ 1) fnReadSheet
+    Reads every "label column + period columns" table on a sheet.
+    It finds the tables by itself. No header texts are needed.
+=====================================================================
 
 (Sheet as table, optional FromText as nullable text, optional ToText as nullable text,
  optional SideGroup as nullable logical, optional SectionPrefix as nullable text) as table =>
@@ -172,9 +201,14 @@ in
     Result
 
 
-    _______________________________
-
-
+=====================================================================
+ 2) BlockConfig          (load OFF)
+    One line per sheet. FromText = a text that marks where the INPUT
+    table starts (rightmost match is used). ToText = where to stop.
+    SideGroup = true only for ORMT Details. SectionPrefix = row labels
+    that open a sub-section (separated by |).
+    Check that the Sheet names match your tab names exactly.
+=====================================================================
 
 let
     Config = #table(
@@ -199,8 +233,10 @@ let
 in
     Config
 
-    _________________________
 
+=====================================================================
+ 3) CheckBlocks          (load OFF)  - open this FIRST after changes
+=====================================================================
 
 let
     Checked = Table.AddColumn(BlockConfig, "Status", each
@@ -213,7 +249,35 @@ let
     Result = Table.SelectColumns(Checked, {"Topic", "Sheet", "Status"})
 in
     Result
-___________________________
+
+
+=====================================================================
+ 4) FactData             (load ON)  - the one table for all topics
+=====================================================================
+
+let
+    WithData = Table.AddColumn(BlockConfig, "Data", each
+        try fnReadSheet(Workbook{[Item = [Sheet], Kind = "Sheet"]}[Data],
+                        [FromText], [ToText], [SideGroup], [SectionPrefix])
+        otherwise null),
+    Found    = Table.SelectRows(WithData, each [Data] <> null),
+    Expanded = Table.ExpandTableColumn(Found, "Data",
+                   {"BlockNo", "Block", "Entity", "Group", "Scenario", "Section", "RowNo",
+                    "Item", "SignHint", "IsTotal", "Period", "PeriodType", "Year", "Measure", "Value"}),
+    Removed  = Table.RemoveColumns(Expanded, {"FromText", "ToText", "SideGroup", "SectionPrefix"}),
+    Typed    = Table.TransformColumnTypes(Removed, {
+                   {"BlockNo", Int64.Type}, {"RowNo", Int64.Type}, {"Year", Int64.Type},
+                   {"Value", type number}, {"IsTotal", type logical},
+                   {"Block", type text}, {"Entity", type text}, {"Group", type text},
+                   {"Section", type text}, {"Item", type text}, {"Period", type text},
+                   {"Measure", type text}})
+in
+    Typed
+
+
+=====================================================================
+ 5) DimItem              (load ON)  - keeps the Excel row order
+=====================================================================
 
 let
     Src     = Table.SelectColumns(FactData, {"Item", "RowNo"}),
@@ -223,8 +287,37 @@ in
     Grouped
 
 
+=====================================================================
+ 6) DimPeriod            (load ON)  - Act 2025 < HY26 < For 2026 < Plan 2027 ...
+=====================================================================
 
-    _______________________
+let
+    Src     = Table.SelectColumns(FactData, {"Period", "Year", "PeriodType"}),
+    Grouped = Table.Group(Src, {"Period"},
+                  {{"Year", each List.Max([Year]), Int64.Type},
+                   {"PeriodType", each List.First([PeriodType]), type text}},
+                  GroupKind.Global, Comparer.OrdinalIgnoreCase),
+    Ordered = Table.AddColumn(Grouped, "PeriodOrder", each
+                  (if [Year] = null then 9999 else [Year]) * 10
+                  + (if [PeriodType] = "Actual" then 1
+                     else if [PeriodType] = "Half-Year" then 2
+                     else if [PeriodType] = "Pro Forma SII" then 3
+                     else if [PeriodType] = "Forecast" then 4
+                     else if [PeriodType] = "Year" then 5
+                     else if [PeriodType] = "Plan" then 6 else 7), Int64.Type)
+in
+    Ordered
+
+
+=====================================================================
+ 7) fnReadList  (OPTIONAL - only for the record lists:
+    Debt Management, Options Monitoring, ORMT, Local RAF, Initiatives)
+    KeyText    = a text in the TOP header row of the table
+    HeaderRows = how many rows the header has
+    Pick       = 1 first table found, 2 second, 0 last
+    MaxRows    = how many template rows to read below the header
+    FillDownFirst = copy the first N columns down (merged cells)
+=====================================================================
 
 (Sheet as table, FromText as nullable text, ToText as nullable text, KeyText as text,
  HeaderRows as number, Pick as number, MaxRows as number, optional FillDownFirst as nullable number) as table =>
@@ -285,8 +378,13 @@ let
 in
     T5
 
-    ____________________________
 
+=====================================================================
+ 8) List queries (OPTIONAL, one query each, load ON). Create only
+    the ones you need. Each is 3 lines.
+=====================================================================
+
+--- List_DebtExisting
 let
     Sheet  = Workbook{[Item = "Debt Management", Kind = "Sheet"]}[Data],
     Result = fnReadList(Sheet, "Proposals on Existing Debt", null, "Borrower", 1, 1, 37, 0)
@@ -328,16 +426,29 @@ let
 in
     Result
 
-    
 
-    
+=====================================================================
+ 9) MODEL + DAX (after Chiudi e applica)
+=====================================================================
 
-    
+Model view:
+  DimItem[Item]     1 -> *  FactData[Item]
+  DimPeriod[Period] 1 -> *  FactData[Period]
+Data view:
+  DimItem   > Item   > Ordina per colonna > ItemOrder
+  DimPeriod > Period > Ordina per colonna > PeriodOrder
+  FactData  > Year, RowNo, BlockNo > Riepilogo: Non riepilogare
 
+Measures (Home > Nuova misura, one at a time):
 
+Value = SUM ( FactData[Value] )
 
+Value Current = CALCULATE ( [Value], FactData[Scenario] = "Current" )
 
+Value Previous = CALCULATE ( [Value], FactData[Scenario] = "Previous" )
 
-    
+Delta = [Value Current] - [Value Previous]
 
-    
+Delta % = DIVIDE ( [Delta], ABS ( [Value Previous] ) )
+
+Value excl Totals = CALCULATE ( [Value], FactData[IsTotal] = FALSE () )
