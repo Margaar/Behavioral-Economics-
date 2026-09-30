@@ -1,127 +1,343 @@
-# Behavioral-Economics-
-Beh economics assignment 
+#Behavioral Economics 
 
 
-(Sheet as table, HeaderText as text, Scenario as text, optional UseRightmost as logical) as table =>
+
+(Sheet as table, optional FromText as nullable text, optional ToText as nullable text,
+ optional SideGroup as nullable logical, optional SectionPrefix as nullable text) as table =>
 let
     Clean = Table.ReplaceErrorValues(Sheet, List.Transform(Table.ColumnNames(Sheet), each {_, null})),
-    Rows  = Table.ToRows(Clean),
+    Rows  = List.Buffer(Table.ToRows(Clean)),
+    NR    = List.Count(Rows),
+    NC    = Table.ColumnCount(Sheet),
+    Txt   = (v) => if v = null then null
+                   else Text.Trim(Text.Replace(Text.Replace(Text.From(v), "#(cr)", ""), "#(lf)", " ")),
 
-    IsPrefix = Text.EndsWith(HeaderText, "*"),
-    Key      = if IsPrefix then Text.Start(HeaderText, Text.Length(HeaderText) - 1) else HeaderText,
-    Match    = (v) => v <> null and
-                 (let t = Text.Trim(Text.From(v)) in
-                  if IsPrefix then Text.StartsWith(t, Key) else t = Key),
+    // column window: from the rightmost cell starting with FromText, up to the cell starting with ToText
+    FindCols = (t as text) as list => List.Combine(List.Transform(Rows, (row) =>
+                   List.Select(List.Positions(row), (c) => row{c} is text and Text.StartsWith(Txt(row{c}), t)))),
+    C0 = if FromText = null or FromText = "" then 0
+         else let f = FindCols(FromText) in
+              if List.IsEmpty(f) then error Error.Record("FromText not found", FromText) else List.Max(f),
+    C1 = if ToText = null or ToText = "" then NC - 1
+         else let f = List.Select(FindCols(ToText), (c) => c > C0) in
+              if List.IsEmpty(f) then error Error.Record("ToText not found", ToText) else List.Min(f) - 1,
+    WinCols = List.Buffer(List.Numbers(C0, C1 - C0 + 1)),
 
-    Hits = List.Combine(
-        List.Transform(List.Positions(Rows), (r) =>
-            let row = Rows{r} in
-            List.Transform(List.Select(List.Positions(row), (c) => Match(row{c})),
-                           (c) => [R = r, C = c]))),
+    // period header cells: 2026, 2030*, Act 2025, For 2026, Plan 2027, HY26, Pro Forma ... 2026, Benchmark
+    IsPeriod = (v) =>
+        if v is number then v >= 2000 and v <= 2100 and Number.Round(v) = v
+        else if v is text then
+            (let s = Text.Upper(Txt(v)), d = Text.Select(s, {"0".."9"}) in
+                (Text.Length(d) = 4 and Text.StartsWith(d, "20"))
+                or (Text.StartsWith(s, "HY") and Text.Length(d) = 2)
+                or s = "BENCHMARK")
+        else false,
 
-    Chosen =
-        if List.IsEmpty(Hits) then error Error.Record("Block not found", HeaderText)
-        else if IsPrefix then Hits
-        else if UseRightmost = true then {List.Last(List.Sort(Hits, (a, b) => Value.Compare(a[C], b[C])))}
-        else {List.First(Hits)},
+    IsHeader = (r as number) as logical =>
+        let cells = List.Transform(WinCols, (c) => Rows{r}{c}),
+            nPer  = List.Count(List.Select(cells, IsPeriod)),
+            nNum  = List.Count(List.Select(cells, (v) => v is number and not IsPeriod(v)))
+        in nPer >= 2 and nNum = 0,
+    HdrRows = List.Buffer(List.Select(List.Numbers(0, NR), IsHeader)),
 
-    IsPeriod = (v) => v <> null and
-        (let s = Text.Upper(Text.Trim(Text.From(v))),
-             t = Text.Select(s, {"0".."9"})
-         in (Text.Length(t) = 4 and Text.StartsWith(t, "20"))
-            or (Text.Length(t) = 2 and Text.StartsWith(s, "HY"))),
+    Junk = (t) => t = null or t = "" or t = "0" or Text.StartsWith(t, "*")
+                  or Text.Upper(t) = "TO ALLOCATE" or Text.StartsWith(Text.Upper(t), "WHERE NEEDED"),
+    FillFwd = (lst as list) as list => List.Accumulate(lst, {}, (s, v) =>
+                  s & {if v <> null and v <> "" then v else (if List.IsEmpty(s) then null else List.Last(s))}),
+    Prefixes = if SectionPrefix = null or SectionPrefix = "" then {} else Text.Split(SectionPrefix, "|"),
+    IsSec = (t) => t <> null and List.AnyTrue(List.Transform(Prefixes, (p) => Text.StartsWith(t, p))),
 
-    ReadBlock = (hit as record) as list =>
+    // entity (Company #...) near each header, carried forward to the next tables
+    P0Of  = (h) => List.Min(List.Select(WinCols, (c) => IsPeriod(Rows{h}{c}))),
+    EntOf = (h) =>
+        let p0 = P0Of(h),
+            cells = List.Combine(List.Transform(List.Select(List.Numbers(h, 7, -1), (r) => r >= 0),
+                        (r) => List.Transform(List.Numbers(p0 - 1, p0, -1), (c) => Txt(Rows{r}{c}))))
+        in List.First(List.Select(cells, (t) => t <> null
+               and Text.StartsWith(Text.Upper(t), "COMPANY")
+               and not Text.StartsWith(Text.Upper(t), "COMPANIES")
+               and not Text.StartsWith(Text.Upper(t), "COMPANY NAME")), null),
+    EntFill = List.Buffer(FillFwd(List.Transform(HdrRows, EntOf))),
+
+    ReadBlock = (k as number) as list =>
         let
-            HeaderRow   = Rows{hit[R]},
-            After       = List.Skip(List.Positions(HeaderRow), hit[C] + 1),
-            AfterNN     = List.Skip(After, (c) => HeaderRow{c} = null),
-            PerPos      = List.FirstN(AfterNN, (c) => IsPeriod(HeaderRow{c})),
-            IsEmptyRow  = (row) => List.IsEmpty(List.RemoveNulls(
-                              List.Transform({hit[C]} & PerPos, (c) => row{c}))),
-            IsHeaderRow = (row) => List.AnyTrue(
-                              List.Transform(PerPos, (c) => row{c} is text and IsPeriod(row{c}))),
-            Body        = List.FirstN(List.Skip(Rows, hit[R] + 1),
-                              (row) => not IsEmptyRow(row) and not IsHeaderRow(row)),
-            BlockName   = Text.Trim(Text.From(HeaderRow{hit[C]}))
-        in
-            List.Combine(List.Transform(Body, (row) =>
-                List.Transform(PerPos, (c) => [
-                    Block    = BlockName,
-                    RawItem  = if row{hit[C]} = null then "" else Text.Trim(Text.From(row{hit[C]})),
-                    Period   = Text.Trim(Text.From(HeaderRow{c})),
-                    RawValue = row{c}
-                ]))),
+            h       = HdrRows{k},
+            hEnd    = if k + 1 < List.Count(HdrRows) then HdrRows{k + 1} else NR,
+            HRow    = Rows{h},
+            p0      = P0Of(h),
+            BodyAll = List.Numbers(h + 1, hEnd - h - 1),
+            HasText = (c) => List.AnyTrue(List.Transform(BodyAll, (r) =>
+                          Rows{r}{c} is text and not Junk(Txt(Rows{r}{c})))),
+            LabCand = List.Select(List.Reverse(List.Select(WinCols, (c) => c < p0)), HasText),
+            LabelCol = if List.IsEmpty(LabCand) then null else LabCand{0},
 
-    Long = List.Combine(List.Transform(Chosen, ReadBlock)),
-    T0 = if List.IsEmpty(Long)
-         then #table({"Block", "RawItem", "Period", "RawValue"}, {})
-         else Table.FromRecords(Long),
-    T1 = Table.SelectRows(T0, each [RawItem] <> "" and [RawItem] <> "0"),
-    T2 = Table.AddColumn(T1, "Scenario", each Scenario, type text),
-    T3 = Table.AddColumn(T2, "Year", each
-            let t = Text.Select([Period], {"0".."9"}) in
-            if Text.Length(t) = 2 then 2000 + Number.From(t) else Number.From(t), Int64.Type),
-    T4 = Table.AddColumn(T3, "PeriodType", each
+            ValArea = List.Select(WinCols, (c) => c >= p0),
+            HFill   = FillFwd(List.Transform(ValArea, (c) => if IsPeriod(HRow{c}) then Txt(HRow{c}) else null)),
+
+            // optional second header row (Gross/Net, MV/Purchases/Sales...)
+            SubR     = h + 1,
+            SubOK    = SubR < hEnd,
+            SubCells = if SubOK then List.Transform(ValArea, (c) => Rows{SubR}{c})
+                       else List.Repeat({null}, List.Count(ValArea)),
+            IsSubTxt = (v) => v is text and not IsPeriod(v)
+                       and not List.Contains({"", "N.A.", "N.A", "-", "N/A"}, Text.Upper(Txt(v))),
+            SubLab   = if SubOK and LabelCol <> null then Txt(Rows{SubR}{LabelCol}) else null,
+            HasSub   = SubOK and List.Count(List.Select(SubCells, IsSubTxt)) >= 2
+                       and (SubLab = null or SubLab = "" or Text.StartsWith(Text.Lower(SubLab), "amounts")),
+            ValPos   = List.Select(List.Positions(ValArea), (i) =>
+                           if HasSub then IsSubTxt(SubCells{i}) and HFill{i} <> null
+                           else IsPeriod(HRow{ValArea{i}})),
+
+            // optional group row above the periods (Current ... / Previous ...)
+            GCells  = if h > 0 then List.Transform(ValArea, (c) =>
+                          let t = Txt(Rows{h - 1}{c}) in if t = null or t = "" or IsPeriod(t) then null else t)
+                      else List.Repeat({null}, List.Count(ValArea)),
+            UseGrp  = List.Count(List.RemoveNulls(GCells)) >= 2,
+            GFill   = if UseGrp then FillFwd(GCells) else List.Repeat({null}, List.Count(ValArea)),
+
+            BodyStart = if HasSub then h + 2 else h + 1,
+            Body    = List.Numbers(BodyStart, List.Max({0, hEnd - BodyStart})),
+            UseSide = SideGroup = true and LabelCol <> null and LabelCol > 0,
+            SecVals = List.Transform(Body, (r) =>
+                          if UseSide then Txt(Rows{r}{LabelCol - 1})
+                          else let l = Txt(Rows{r}{LabelCol}) in if IsSec(l) then l else null),
+            SecFill = FillFwd(SecVals),
+
+            HLabel  = Txt(HRow{LabelCol}),
+            HLeft   = List.Select(List.Transform(List.Reverse(List.Select(WinCols, (c) => c < LabelCol)),
+                          (c) => Txt(HRow{c})), (t) => t <> null and t <> "" and not IsPeriod(t)),
+            FirstIt = List.First(List.Select(List.Transform(Body, (r) => Txt(Rows{r}{LabelCol})),
+                          (t) => not Junk(t)), null),
+            BlockNm = if HLabel <> null and HLabel <> "" and HLabel <> "0" and not IsPeriod(HLabel) then HLabel
+                      else if not List.IsEmpty(HLeft) then HLeft{0}
+                      else if FirstIt <> null then FirstIt
+                      else "Block " & Text.From(k + 1),
+            EntV    = EntFill{k},
+
+            Recs = List.Combine(List.Transform(List.Positions(Body), (j) =>
+                       let r = Body{j}, lab = Txt(Rows{r}{LabelCol}) in
+                       if Junk(lab) then {}
+                       else List.Transform(ValPos, (i) => [
+                           BlockNo  = k + 1,
+                           Block    = BlockNm,
+                           Entity   = EntV,
+                           Grp      = GFill{i},
+                           Section  = SecFill{j},
+                           RowNo    = r + 1,
+                           RawItem  = lab,
+                           Period   = HFill{i},
+                           Measure  = if HasSub then Txt(SubCells{i}) else null,
+                           RawValue = Rows{r}{ValArea{i}}
+                       ])))
+        in
+            if LabelCol = null then {} else Recs,
+
+    Long  = List.Combine(List.Transform(List.Positions(HdrRows), ReadBlock)),
+    Cols0 = {"BlockNo", "Block", "Entity", "Grp", "Section", "RowNo", "RawItem", "Period", "Measure", "RawValue"},
+    T0 = if List.IsEmpty(Long) then #table(Cols0, {}) else Table.FromRecords(Long),
+
+    T1 = Table.AddColumn(T0, "Scenario", each
+            if Text.Contains(Text.Upper((if [Grp] = null then "" else [Grp]) & " " & [Block]), "PREVIOUS")
+            then "Previous" else "Current", type text),
+    T2 = Table.AddColumn(T1, "Year", each
+            let d = Text.Select([Period], {"0".."9"}) in
+            if Text.Length(d) = 4 then Number.From(d)
+            else if Text.Length(d) = 2 then 2000 + Number.From(d) else null, Int64.Type),
+    T3 = Table.AddColumn(T2, "PeriodType", each
             let s = Text.Upper([Period]) in
             if Text.Contains(s, "PRO FORMA") then "Pro Forma SII"
             else if Text.StartsWith(s, "HY") then "Half-Year"
             else if Text.StartsWith(s, "ACT") then "Actual"
             else if Text.StartsWith(s, "FOR") then "Forecast"
             else if Text.StartsWith(s, "PLAN") then "Plan"
-            else "Year", type text),
-    T5 = Table.AddColumn(T4, "SignHint", each
-            if Text.Contains([RawItem], "(-/+)") then "-/+"
-            else if Text.Contains([RawItem], "(-)") then "-"
-            else if Text.Contains([RawItem], "(+)") then "+"
-            else null, type text),
-    T6 = Table.AddColumn(T5, "Item", each
-            Text.Trim(Text.Replace(Text.Replace(Text.Replace([RawItem], "(-/+)", ""), "(-)", ""), "(+)", "")),
-            type text),
-    T7 = Table.AddColumn(T6, "IsTotal", each Text.StartsWith([Item], "Total"), type logical),
-    T8 = Table.AddColumn(T7, "Value", each
-            if [RawValue] = null then 0
-            else try Number.From([RawValue]) otherwise 0, type number),
-    Result = Table.SelectColumns(T8,
-            {"Scenario", "Block", "Item", "Period", "PeriodType", "Year", "SignHint", "IsTotal", "Value"})
+            else if s = "BENCHMARK" then "Benchmark"
+            else let rest = Text.Trim(Text.Remove([Period], {"0".."9", "*"})) in
+                 if rest = "" then "Year" else rest, type text),
+    T4 = Table.AddColumn(T3, "SignHint", each
+            let t = [RawItem] in
+            if Text.Contains(t, "(+/-)") then "+/-"
+            else if Text.Contains(t, "(-/+)") then "-/+"
+            else if Text.Contains(t, "(-)") then "-"
+            else if Text.Contains(t, "(+)") then "+" else null, type text),
+    T5 = Table.AddColumn(T4, "Item", each
+            Text.Trim(Text.Remove(List.Accumulate({"(+/-)", "(-/+)", "(-)", "(+)"}, [RawItem],
+                (s, p) => Text.Replace(s, p, "")), {"*"})), type text),
+    T6 = Table.AddColumn(T5, "IsTotal", each Text.StartsWith(Text.Upper([Item]), "TOTAL"), type logical),
+    T7 = Table.AddColumn(T6, "Value", each
+            if [RawValue] is number then [RawValue] else try Number.From([RawValue]) otherwise null, type number),
+    T8 = Table.RenameColumns(T7, {{"Grp", "Group"}}),
+    Result = Table.SelectColumns(T8, {"BlockNo", "Block", "Entity", "Group", "Scenario", "Section", "RowNo",
+                 "Item", "SignHint", "IsTotal", "Period", "PeriodType", "Year", "Measure", "Value"})
 in
     Result
 
 
+    _______________________________
 
 
 
-
-    let
-    WithData = Table.AddColumn(BlockConfig, "Data", each
-        try fnGetBlock(
-                Workbook{[Item = [Sheet], Kind = "Sheet"]}[Data],
-                [HeaderText], [Scenario], [UseRightmost])
-        otherwise null),
-    Found    = Table.SelectRows(WithData, each [Data] <> null),
-    Expanded = Table.ExpandTableColumn(Found, "Data",
-                   {"Block", "Item", "Period", "PeriodType", "Year", "SignHint", "IsTotal", "Value"}),
-    NoTotals = Table.SelectRows(Expanded, each [IsTotal] = false),
-    Result   = Table.SelectColumns(NoTotals,
-                   {"Topic", "Sheet", "Block", "Scenario", "Item", "Period", "PeriodType", "Year", "SignHint", "Value"}),
-    Typed    = Table.TransformColumnTypes(Result, {{"Year", Int64.Type}, {"Value", type number}})
-in
-    Typed
-
-
-
-
-
-            {
-            {"Remittance",    "Total Remittance",              "Current Finalized/Planned Remittance",    "Current",  true},
-            {"Remittance",    "Total Remittance",              "Previous Planned Remittance",             "Previous", true},
-            {"Capital Needs", "Capital Needs",                 "Current Finalized/Planned Capital Needs", "Current",  false},
-            {"Capital Needs", "Capital Needs",                 "Previous Planned Capital Needs",          "Previous", false},
-            {"Solvency",      "Solvency, Distributions & FTC", "Company #*",                              "Current",  false}
+let
+    Config = #table(
+        type table [Topic = text, Sheet = text, FromText = nullable text, ToText = nullable text,
+                    SideGroup = logical, SectionPrefix = nullable text],
+        {
+            {"Remittance",            "Total Remittance",              "Instructions",                      null, false, null},
+            {"Remittance by Company", "Remittance by Company",         "Companies in Full and Light Scope", null, false, null},
+            {"Remittance Holding",    "Remittance Holding",            "Cash Position",                     null, false, null},
+            {"Capital Needs",         "Capital Needs",                 null, "Capital Needs (Inflows)",           false, null},
+            {"Solvency",              "Solvency, Distributions & FTC", "Instructions",                      null, false, null},
+            {"Solvency AoM",          "Solvency AoM",                  "EOF (BoP)",                         null, false, "EOF (BoP)|SCR (BoP)"},
+            {"Free Tangible Capital", "Free Tangible Capital",         "Companies in Full Scope",           null, false, null},
+            {"Sensitivities",         "Sens on Net Result & Solvency", "Companies in Full Scope",           null, false, "Impact of"},
+            {"SAA",                   "SAA",                           "Cash & Cash Equivalent", "Sales and Redemptions",  false, null},
+            {"Life KPIs",             "Life KPIs",                     "NBV",                               null, false, null},
+            {"Non-Life KPIs",         "Non-Life KPIs",                 "Earned Premiums",                   null, false, "Earned Premiums|Non-life SII|CoR"},
+            {"HMS Impacts",           "HMS impacts",                   "Instructions",                      null, false, null},
+            {"Model Changes",         "Model Changes Details",         "Instructions",                      null, false, null},
+            {"ORMT Details",          "ORMT Details",                  "ORMT Impacts",                      null, true,  null}
         })
+in
+    Config
+
+    _________________________
+
+
+let
+    Checked = Table.AddColumn(BlockConfig, "Status", each
+        let r = try fnReadSheet(Workbook{[Item = [Sheet], Kind = "Sheet"]}[Data],
+                                [FromText], [ToText], [SideGroup], [SectionPrefix])
+        in if r[HasError] then "ERROR: " & r[Error][Reason] & " - " & Text.From(r[Error][Message])
+           else Text.From(Table.RowCount(r[Value])) & " rows | "
+                & Text.From(List.Count(List.Distinct(r[Value][BlockNo]))) & " blocks: "
+                & Text.Combine(List.Distinct(List.Transform(r[Value][Block], Text.From)), " / ")),
+    Result = Table.SelectColumns(Checked, {"Topic", "Sheet", "Status"})
+in
+    Result
+___________________________
+
+let
+    Src     = Table.SelectColumns(FactData, {"Item", "RowNo"}),
+    Grouped = Table.Group(Src, {"Item"}, {{"ItemOrder", each List.Min([RowNo]), Int64.Type}},
+                          GroupKind.Global, Comparer.OrdinalIgnoreCase)
+in
+    Grouped
+
+
+
+    _______________________
+
+(Sheet as table, FromText as nullable text, ToText as nullable text, KeyText as text,
+ HeaderRows as number, Pick as number, MaxRows as number, optional FillDownFirst as nullable number) as table =>
+let
+    Clean = Table.ReplaceErrorValues(Sheet, List.Transform(Table.ColumnNames(Sheet), each {_, null})),
+    Rows  = List.Buffer(Table.ToRows(Clean)),
+    NR    = List.Count(Rows),
+    NC    = Table.ColumnCount(Sheet),
+    Txt   = (v) => if v = null then null
+                   else Text.Trim(Text.Replace(Text.Replace(Text.From(v), "#(cr)", ""), "#(lf)", " ")),
+    FindCols = (t as text) as list => List.Combine(List.Transform(Rows, (row) =>
+                   List.Select(List.Positions(row), (c) => row{c} is text and Text.StartsWith(Txt(row{c}), t)))),
+    C0 = if FromText = null or FromText = "" then 0
+         else let f = FindCols(FromText) in
+              if List.IsEmpty(f) then error Error.Record("FromText not found", FromText) else List.Max(f),
+    C1 = if ToText = null or ToText = "" then NC - 1
+         else let f = List.Select(FindCols(ToText), (c) => c > C0) in
+              if List.IsEmpty(f) then error Error.Record("ToText not found", ToText) else List.Min(f) - 1,
+    WinCols = List.Numbers(C0, C1 - C0 + 1),
+
+    Hits = List.Select(List.Numbers(0, NR), (r) => List.AnyTrue(List.Transform(WinCols, (c) =>
+               let t = Txt(Rows{r}{c}) in t <> null and Text.StartsWith(t, KeyText)))),
+    R  = if List.IsEmpty(Hits) or List.Count(Hits) < Pick then error Error.Record("KeyText not found", KeyText)
+         else if Pick = 0 then List.Last(Hits) else Hits{Pick - 1},
+    HR = List.Numbers(R, HeaderRows),
+
+    FFRow = (r as number, ff as logical) as list => List.Accumulate(WinCols, {}, (s, c) =>
+                let t = Txt(Rows{r}{c}),
+                    v = if t <> null and t <> "" then t
+                        else if ff and not List.IsEmpty(s) then List.Last(s) else null
+                in s & {v}),
+    HdrGrid  = List.Transform(List.Positions(HR), (i) => FFRow(HR{i}, i < HeaderRows - 1)),
+    Orig     = List.Transform(HR, (r) => List.Transform(WinCols, (c) => let t = Txt(Rows{r}{c}) in t <> null and t <> "")),
+    KeepIdx  = List.Select(List.Positions(WinCols), (j) => List.AnyTrue(List.Transform(Orig, (o) => o{j}))),
+    RawNames = List.Transform(KeepIdx, (j) =>
+                   Text.Combine(List.Distinct(List.RemoveNulls(List.Transform(HdrGrid, (g) => g{j}))), " - ")),
+    Names    = List.Accumulate(RawNames, {}, (s, n) =>
+                   s & {if List.Contains(s, n) then n & " (" & Text.From(List.Count(s) + 1) & ")" else n}),
+    KeepCols = List.Transform(KeepIdx, (j) => WinCols{j}),
+    LabelC   = List.Min(KeepCols) - 1,
+    AllCols  = if LabelC >= 0 then {LabelC} & KeepCols else KeepCols,
+    AllNames = if LabelC >= 0 then {"Label"} & Names else Names,
+
+    First = List.Last(HR) + 1,
+    BodyR = List.Numbers(First, List.Max({0, List.Min({MaxRows, NR - First})})),
+    T0 = Table.FromRows(List.Transform(BodyR, (r) => List.Transform(AllCols, (c) => Rows{r}{c})), AllNames),
+    NFill = if FillDownFirst = null then 0 else FillDownFirst,
+    T1 = if NFill = 0 then T0 else Table.FillDown(T0, List.FirstN(Names, NFill)),
+    DataCols = List.Skip(Names, NFill),
+    Meaningful = (v) => v <> null and not (v is text and Text.Trim(v) = "") and not (v is number and v = 0),
+    T2 = Table.AddIndexColumn(T1, "RowNo", 1, 1, Int64.Type),
+    T3 = Table.SelectRows(T2, (row) =>
+             List.Count(List.Select(List.Transform(DataCols, (n) => Record.Field(row, n)), Meaningful)) > 0),
+    T4 = Table.SelectRows(T3, (row) => not List.AnyTrue(List.Transform(AllNames, (n) =>
+             let v = Record.Field(row, n) in v is text and Text.StartsWith(Text.Trim(v), KeyText)))),
+    T5 = if List.Contains(AllNames, "Label") and List.NonNullCount(Table.Column(T4, "Label")) = 0
+         then Table.RemoveColumns(T4, {"Label"}) else T4
+in
+    T5
+
+    ____________________________
+
+let
+    Sheet  = Workbook{[Item = "Debt Management", Kind = "Sheet"]}[Data],
+    Result = fnReadList(Sheet, "Proposals on Existing Debt", null, "Borrower", 1, 1, 37, 0)
+in
+    Result
+
+--- List_DebtNew
+let
+    Sheet  = Workbook{[Item = "Debt Management", Kind = "Sheet"]}[Data],
+    Result = fnReadList(Sheet, "Proposals on Existing Debt", null, "Borrower", 1, 2, 35, 0)
+in
+    Result
+
+--- List_Options
+let
+    Sheet  = Workbook{[Item = "Options Monitoring", Kind = "Sheet"]}[Data],
+    Result = fnReadList(Sheet, "ID", null, "Option Buyer", 2, 1, 15, 0)
+in
+    Result
+
+--- List_ORMT
+let
+    Sheet  = Workbook{[Item = "ORMT", Kind = "Sheet"]}[Data],
+    Result = fnReadList(Sheet, "ID", null, "Cedant", 1, 1, 50, 0)
+in
+    Result
+
+--- List_LocalRAF
+let
+    Sheet  = Workbook{[Item = "Local RAF", Kind = "Sheet"]}[Data],
+    Result = fnReadList(Sheet, "Currently in place", null, "Currently in place", 3, 1, 30, 0)
+in
+    Result
+
+--- List_Initiatives
+let
+    Sheet  = Workbook{[Item = "Initiatives", Kind = "Sheet"]}[Data],
+    Result = fnReadList(Sheet, "ID", null, "Expected Timeline", 2, 1, 100, 8)
+in
+    Result
+
+    
+
+    
+
+    
 
 
 
 
 
-        
+    
+
+    
