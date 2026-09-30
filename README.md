@@ -1,5 +1,5 @@
-
-====================================================================
+"=====================================================================
+ CAPITAL DEEP DIVE -> POWER BI   |   Power Query code, final version
 =====================================================================
 
 HOW TO USE
@@ -451,4 +451,4 @@ Delta = [Value Current] - [Value Previous]
 
 Delta % = DIVIDE ( [Delta], ABS ( [Value Previous] ) )
 
-Value excl Totals = CALCULATE ( [Value], FactData[IsTotal] = FALSE () )
+Value excl Totals = CALCULATE ( [Value], FactData[IsTotal] = FALSE () )"
