@@ -1,5 +1,5 @@
 ' =====================================================================
-'  EXCEL AUDIT  v3  (VBA)
+'  EXCEL AUDIT  v3.1  (VBA)
 '
 '  What changed against v2
 '    - RESULT INSIDE AuditTool: three sheets are written at the end
@@ -13,7 +13,8 @@
 '
 '  INSTALL: open AuditTool.xlsm > Alt+F11 > Modulo1 > Ctrl+A > paste this > Ctrl+S
 '  RUN    : Alt+F8 > RunAudit > Esegui
-'  Do not open the CSV files while it runs. Progress: AuditOut\audit_log.txt (Notepad).
+'  Output folder: C:\Users\<you>\AuditOut (local disk), wherever AuditTool itself is saved.
+'  Do not open the CSV files while it runs. Progress: audit_log.txt in that folder (Notepad).
 ' =====================================================================
 
 Option Explicit
@@ -62,12 +63,13 @@ Public Sub RunAudit()
         Set mShNames(i) = CreateObject("Scripting.Dictionary")
     Next i
 
-    outDir = ThisWorkbook.path & "\AuditOut"
+    ' output goes to a LOCAL folder (C:\Users\<you>\AuditOut), never to a network drive
+    outDir = Environ$("USERPROFILE") & "\AuditOut"
     mStage = "creating the output folder " & outDir
     If Dir(outDir, vbDirectory) = "" Then MkDir outDir
-    runName = CleanName(BaseName(newPath))
+    runName = Left$(CleanName(BaseName(newPath)), 40)
     mLog = outDir & "\audit_log.txt"
-    LogLine "=== v3 run '" & runName & "' started " & Format$(Now, "dd/mm/yyyy hh:nn")
+    LogLine "=== v3.1 run '" & runName & "' started " & Format$(Now, "dd/mm/yyyy hh:nn")
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
@@ -87,7 +89,8 @@ Public Sub RunAudit()
            "Formulas: " & totF & vbCrLf & _
            "Error cells: " & totE & vbCrLf & _
            "Suspicious cells: " & totFl & vbCrLf & vbCrLf & _
-           "See the sheets Audit_Summary, Audit_Findings, Audit_Changes.", vbInformation
+           "See the sheets Audit_Summary, Audit_Findings, Audit_Changes." & vbCrLf & _
+           "CSV files and log: " & outDir, vbInformation
 Done:
     Application.StatusBar = False
     Application.AutomationSecurity = sec
