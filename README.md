@@ -5,6 +5,7 @@ let
     Rows  = List.Buffer(Table.ToRows(Clean)),
     NR    = List.Count(Rows),
     NC    = Table.ColumnCount(Sheet),
+    EntNames = List.Buffer(List.Transform(List.RemoveNulls(EntityList[Entity]), each Text.Upper(Text.Trim(_)))),
     Txt   = (v) => if v = null then null
                    else Text.Trim(Text.Replace(Text.Replace(Text.From(v), "#(cr)", ""), "#(lf)", " ")),
 
@@ -33,7 +34,10 @@ let
             nNum  = List.Count(List.Select(cells, (v) => v is number and not IsPeriod(v)))
         in nPer >= 2 and nNum = 0,
     HdrAll  = List.Buffer(List.Select(List.Numbers(0, NR), IsHeader)),
-    HdrRows = List.Buffer(List.Select(HdrAll, (r) => not List.Contains(HdrAll, r - 1))),
+    NoNum    = (a, b) => List.AllTrue(List.Transform(List.Numbers(a + 1, List.Max({0, b - a - 1})), (r) =>
+                   not List.AnyTrue(List.Transform(WinCols, (c) => Rows{r}{c} is number)))),
+    IsSubHdr = (r) => List.AnyTrue(List.Transform(HdrAll, (p) => p < r and r - p <= 4 and NoNum(p, r))),
+    HdrRows  = List.Buffer(List.Select(HdrAll, (r) => not IsSubHdr(r))),
 
     Junk = (t) => t = null or t = "" or t = "0" or Text.StartsWith(t, "*")
                   or Text.Upper(t) = "TO ALLOCATE" or Text.StartsWith(Text.Upper(t), "WHERE NEEDED"),
@@ -48,10 +52,9 @@ let
             LeftCols = List.Reverse(List.Select(WinCols, (c) => c < p0)),
             cells = List.Combine(List.Transform(List.Select(List.Numbers(h, 7, -1), (r) => r >= 0),
                         (r) => List.Transform(LeftCols, (c) => Txt(Rows{r}{c}))))
-        in List.First(List.Select(cells, (t) => t <> null
-               and Text.StartsWith(Text.Upper(t), "COMPANY")
-               and not Text.StartsWith(Text.Upper(t), "COMPANIES")
-               and not Text.StartsWith(Text.Upper(t), "COMPANY NAME")), null),
+        in List.First(List.Select(cells, (t) => t <> null and
+               (Text.StartsWith(Text.Upper(t), "COMPANY #")
+                or List.AnyTrue(List.Transform(EntNames, (n) => Text.StartsWith(Text.Upper(t), n))))), null),
     EntFill = List.Buffer(FillFwd(List.Transform(HdrRows, EntOf))),
 
     ReadBlock = (k as number) as list =>
@@ -69,7 +72,7 @@ let
             ValArea = List.Select(WinCols, (c) => c >= p0),
             HFill   = FillFwd(List.Transform(ValArea, (c) => if IsPeriod(HRow{c}) then Txt(HRow{c}) else null)),
 
-            SubR     = h + 1,
+            SubR     = List.First(List.Select(HdrAll, (q) => q > h and q <= h + 4 and not List.Contains(HdrRows, q)), h + 1),
             SubOK    = SubR < hEnd,
             SubCells = if SubOK then List.Transform(ValArea, (c) => Rows{SubR}{c})
                        else List.Repeat({null}, List.Count(ValArea)),
@@ -89,7 +92,7 @@ let
             UseGrp  = List.Count(List.RemoveNulls(GCells)) >= 2,
             GFill   = if UseGrp then FillFwd(GCells) else List.Repeat({null}, List.Count(ValArea)),
 
-            BodyStart = if HasSub then h + 2 else h + 1,
+            BodyStart = if HasSub then SubR + 1 else h + 1,
             Body    = List.Numbers(BodyStart, List.Max({0, hEnd - BodyStart})),
             UseSide = SideGroup = true and LabelCol <> null and LabelCol > 0,
             SecVals = List.Transform(Body, (r) =>
