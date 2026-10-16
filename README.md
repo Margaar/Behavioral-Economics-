@@ -1,32 +1,13 @@
-SOL EOF =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Eligible Own Funds" ) )
-SOL SCR =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Solvency Capital Requirement" ) )
-SOL FTC =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Free Tangible Capital" ) )
-SOL NetResult =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Local GAAP Net Result" ) )
-SOL Distributions =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Total Distributions" ) )
-SOL OtherDistr =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Other distributions" ) )
-SOL ForeseeableDiv =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Foreseeable" ) )
-SOL CapNeeds =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency",
-    FactData[PeriodType] IN { "Actual", "Forecast", "Plan", "Year" },
-    CONTAINSSTRING ( FactData[Item], "Capital Needs" ) )
+HMS Invoices =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "HMS Impacts",
+    CONTAINSSTRING ( FactData[Item], "HMS invoices" ), NOT CONTAINSSTRING ( FactData[Item], "not eligible" ) )
+HMS NotEligible =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "HMS Impacts",
+    CONTAINSSTRING ( FactData[Item], "not eligible" ) )
+HMS Other =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ), FactData[Topic] = "HMS Impacts",
+    CONTAINSSTRING ( FactData[Item], "Other HMS" ) )
+HMS Check = [HMS Invoices] + [HMS NotEligible] + [HMS Other] - [HMS Net]
+HMS Share of Remittance =
+DIVIDE ( [HMS Net],
+    ABS ( CALCULATE ( [TR Cur], REMOVEFILTERS ( DimItem ), REMOVEFILTERS ( FactData[Entity] ), REMOVEFILTERS ( DimEntity ) ) ) )
