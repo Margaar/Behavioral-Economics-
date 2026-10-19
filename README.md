@@ -1,196 +1,208 @@
 =====================================================================
- SOLVENCY AoM — FIX
- Строки с ">>" 
+ SENSITIVITY ANALYSES ON NET RESULT AND SOLVENCY — сборка страницы
+ Строки с ">>" не копировать. Копировать только код.
 =====================================================================
 
->> ШАГ 1. ДВЕ НОВЫЕ КОЛОНКИ в FactData
->> (вид Dati > FactData > Nuova colonna), по одной.
-
->> AoM Category: одна категория для EOF и SCR, как в таблице
->> "Solvency Ratio" в Excel (Tax impact EOF + Tax impact SCR = одна строка).
-
-AoM Category =
-IF ( FactData[Topic] = "Solvency AoM",
-    VAR it = FactData[Item]
-    RETURN
-        SWITCH ( TRUE (),
-            CONTAINSSTRING ( it, "(BoP)" ), "Solvency Ratio (BoP)",
-            CONTAINSSTRING ( it, "(EoP)" ), "Solvency Ratio (EoP)",
-            CONTAINSSTRING ( it, "Normalised" ), "Normalised Capital Generation",
-            it ) )
-
->> AoM Category Order: порядок строк как в Excel.
-
-AoM Category Order =
-IF ( FactData[Topic] = "Solvency AoM",
-    VAR it = FactData[Item]
-    RETURN
-        SWITCH ( TRUE (),
-            CONTAINSSTRING ( it, "(BoP)" ), 0,
-            CONTAINSSTRING ( it, "Regulatory" ), 1,
-            CONTAINSSTRING ( it, "SII Review" ), 2,
-            CONTAINSSTRING ( it, "Normalised" ), 3,
-            CONTAINSSTRING ( it, "SII VNP" ), 4,
-            CONTAINSSTRING ( it, "CY Tech" ), 5,
-            CONTAINSSTRING ( it, "Non-Economic" ), 8,
-            CONTAINSSTRING ( it, "Economic variances" ), 6,
-            CONTAINSSTRING ( it, "YE25 to HY26" ) && NOT CONTAINSSTRING ( it, "SAA" ), 7,
-            CONTAINSSTRING ( it, "SAA" ) && CONTAINSSTRING ( it, "consumed" ), 9,
-            CONTAINSSTRING ( it, "SAA" ), 10,
-            CONTAINSSTRING ( it, "Residual" ), 11,
-            CONTAINSSTRING ( it, "Tax" ), 12,
-            CONTAINSSTRING ( it, "M&A" ), 13,
-            CONTAINSSTRING ( it, "Capital movements" ), 14,
-            50 ) )
-
->> Потом: выделить колонку AoM Category > Ordina per colonna > AoM Category Order.
+>> ШАГ 0. ПРОВЕРКА (2 минуты)
+>> Dati > FactData > фильтр Topic = Sensitivities. Посмотри колонки:
+>>   Section: должно быть "Impact of Sensitivities on Local GAAP Net Result"
+>>            и "Impact of Sensitivities on Solvency Ratio (%)"
+>>   Item:    шоки (+50 bps Interest Rates, -25% Equity...) и строки
+>>            Total Distributions..., Local GAAP Net Result, Solvency Ratio (%)
+>>   Entity:  Cajamar Vida S.A..., Cajamar Seguros Generales... (НЕ пусто)
+>>   Value у строки "No Volatility Adjustment", ES005, Act 2025:
+>>            0,251  -> ppFactor = 100 (в мерах ниже уже так)
+>>            25,1   -> поменяй ppFactor на 1 в двух мерах
+>> Если Entity пустой или Section другой — пришли фото, поправлю.
 
 
->> ШАГ 2. ЗАМЕНИТЬ 4 МЕРЫ BoP/EoP И 2 ПРОВЕРКИ
->> (нажать на меру, выделить всю формулу, вставить новую).
->> Добавлено: снятие фильтра с новых колонок и исключение строк "o/w".
+>> ШАГ 1. ИСПРАВИТЬ NoScale
+>> Строка "Solvency Ratio (%)" сейчас пересчитывается в тысячи.
+>> Dati > FactData > колонка NoScale > заменить формулу:
 
-AoM EOF BoP =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-    REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-    FactData[Topic] = "Solvency AoM", LEFT ( FactData[Section], 3 ) = "EOF", CONTAINSSTRING ( FactData[Item], "(BoP)" ) )
-
-AoM EOF EoP =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-    REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-    FactData[Topic] = "Solvency AoM", LEFT ( FactData[Section], 3 ) = "EOF", CONTAINSSTRING ( FactData[Item], "(EoP)" ) )
-
-AoM SCR BoP =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-    REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-    FactData[Topic] = "Solvency AoM", LEFT ( FactData[Section], 3 ) = "SCR", CONTAINSSTRING ( FactData[Item], "(BoP)" ) )
-
-AoM SCR EoP =
-CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-    REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-    FactData[Topic] = "Solvency AoM", LEFT ( FactData[Section], 3 ) = "SCR", CONTAINSSTRING ( FactData[Item], "(EoP)" ) )
-
-AoM Check EOF =
-[AoM EOF BoP]
-+ CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-      REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-      FactData[Topic] = "Solvency AoM", LEFT ( FactData[Section], 3 ) = "EOF",
-      NOT CONTAINSSTRING ( FactData[Item], "(BoP)" ), NOT CONTAINSSTRING ( FactData[Item], "(EoP)" ),
-      NOT CONTAINSSTRING ( FactData[Item], "o/w" ) )
-- [AoM EOF EoP]
-
-AoM Check SCR =
-[AoM SCR BoP]
-+ CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-      REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-      FactData[Topic] = "Solvency AoM", LEFT ( FactData[Section], 3 ) = "SCR",
-      NOT CONTAINSSTRING ( FactData[Item], "(BoP)" ), NOT CONTAINSSTRING ( FactData[Item], "(EoP)" ),
-      NOT CONTAINSSTRING ( FactData[Item], "o/w" ) )
-- [AoM SCR EoP]
-
-
->> ШАГ 3. ЗАМЕНИТЬ AoM Ratio Walk (строки "o/w" теперь не считаются,
->> иначе водопад считал бы их дважды)
-
-AoM Ratio Walk =
-VAR ln  = SELECTEDVALUE ( FactData[AoM Line] )
-VAR e0  = [AoM EOF BoP]
-VAR e1  = [AoM EOF EoP]
-VAR s0  = [AoM SCR BoP]
-VAR s1  = [AoM SCR EoP]
-VAR v   = [Value Current]
-VAR isBoP = CONTAINSSTRING ( ln, "(BoP)" )
-VAR isEoP = CONTAINSSTRING ( ln, "(EoP)" )
-VAR isSub = CONTAINSSTRING ( ln, "| o/w" )
+NoScale =
+VAR it  = UPPER ( FactData[Item] )
+VAR itw = " " & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( it, "(", " " ), ")", " " ), ":", " " ) & " "
+VAR ctx = UPPER ( FactData[Block] & " " & FactData[Section] & " " & FactData[Measure] )
 RETURN
-    SWITCH ( TRUE (),
-        NOT HASONEVALUE ( FactData[AoM Line] ), BLANK (),
-        isEoP || isSub, BLANK (),
-        isBoP && LEFT ( ln, 3 ) = "EOF", DIVIDE ( e0, s0 ) * 100,
-        isBoP, BLANK (),
-        LEFT ( ln, 3 ) = "EOF", DIVIDE ( v, s0 ) * 100,
-        LEFT ( ln, 3 ) = "SCR", DIVIDE ( v, s1 - s0 ) * ( DIVIDE ( e1, s1 ) - DIVIDE ( e1, s0 ) ) * 100,
-        BLANK () )
+    IF (
+        FactData[Topic] = "Sensitivities",
+        CONTAINSSTRING ( UPPER ( FactData[Section] & "" ), "SOLVENCY" ) || CONTAINSSTRING ( it, "(%)" ),
+        CONTAINSSTRING ( it, "(%)" ) || CONTAINSSTRING ( itw, " RATIO " ) || CONTAINSSTRING ( it, "P.P." )
+            || CONTAINSSTRING ( it, "TAX RATE" ) || CONTAINSSTRING ( it, "(YEARS)" )
+            || CONTAINSSTRING ( ctx, "%" ) || CONTAINSSTRING ( ctx, "COR (" )
+            || CONTAINSSTRING ( ctx, "RORC" ) || CONTAINSSTRING ( ctx, "PVNBP" )
+    )
 
 
->> ШАГ 4. НОВАЯ МЕРА: вклад категории в Solvency Ratio (как в Excel)
->> Strumenti misura > Formato: Percentuale, 1 десятичный знак.
+>> ШАГ 2. ПЯТЬ КОЛОНОК в FactData (Dati > FactData > Nuova colonna), по порядку.
+>> Если Sens Metric / Sens Shock уже есть из прошлой инструкции — замени их формулы.
 
-AoM Ratio by Category =
-VAR cat = SELECTEDVALUE ( FactData[AoM Category] )
-VAR pp =
-    IF ( cat = "Solvency Ratio (EoP)", [AoM Ratio EoP] * 100,
-         SUMX ( VALUES ( FactData[AoM Line] ), [AoM Ratio Walk] ) )
-RETURN IF ( HASONEVALUE ( FactData[AoM Category] ), DIVIDE ( pp, 100 ) )
+>> Номер строки внутри блока компании (для порядка строк как в Excel)
+Sens RelRow =
+IF ( FactData[Topic] = "Sensitivities",
+     FactData[RowNo]
+     - CALCULATE ( MIN ( FactData[RowNo] ), ALLEXCEPT ( FactData, FactData[Topic], FactData[BlockNo] ) ) )
+
+>> Название строки. Шоки встречаются дважды (Net Result и Solvency),
+>> поэтому к строкам блока Solvency добавлен невидимый символ.
+Sens Line =
+IF ( FactData[Topic] = "Sensitivities",
+     FactData[Item]
+     & IF ( CONTAINSSTRING ( FactData[Section] & "", "Solvency" ) && NOT CONTAINSSTRING ( FactData[Item], "Solvency Ratio" ),
+            UNICHAR ( 8203 ), "" ) )
+
+>> Порядок строк
+Sens Order =
+IF ( FactData[Topic] = "Sensitivities",
+     CALCULATE ( MIN ( FactData[Sens RelRow] ),
+         ALLEXCEPT ( FactData, FactData[Topic], FactData[Section], FactData[Item] ) ) )
+
+>> Только строки-шоки (без заголовков, без Distributions / Net Result / Ratio)
+Sens Shock =
+IF ( FactData[Topic] = "Sensitivities"
+         && LEFT ( FactData[Section] & "", 9 ) = "Impact of"
+         && LEFT ( FactData[Item], 9 ) <> "Impact of"
+         && NOT CONTAINSSTRING ( FactData[Item], "Solvency Ratio" ),
+     FactData[Item] )
+
+>> На что влияет шок
+Sens Metric =
+IF ( NOT ISBLANK ( FactData[Sens Shock] ),
+     IF ( CONTAINSSTRING ( FactData[Section], "Solvency" ), "Solvency", "Net Result" ) )
+
+>> Потом: колонка Sens Line > Ordina per colonna > Sens Order.
 
 
->> ШАГ 5. НОВЫЙ AoM Comment (заменить целиком).
->> Без выбора года берёт последний год; клик по ячейке/срез Year = этот год.
+>> ШАГ 3. МЕРЫ (Home > Nuova misura), по одной.
 
-AoM Comment =
-VAR hardLim = 1.10
-VAR softLim = 1.30
-VAR fmt  = "#,##0"
+>> Значение для таблицы: суммы в выбранных единицах, шоки на ratio в пунктах
+Sens Value =
+VAR ppFactor = 100
+VAR v = CALCULATE ( [Value Current], FactData[Topic] = "Sensitivities" )
+RETURN IF ( SELECTEDVALUE ( FactData[Sens Metric] ) = "Solvency", v * ppFactor, v )
+
+>> ФОРМАТ для Sens Value: выдели меру > Strumenti misura > Formato > "Dinamico"
+>> > в строке формул выбери "Formato" (стрелка слева) и вставь:
+>>
+>> VAR it = SELECTEDVALUE ( FactData[Item] )
+>> VAR m  = SELECTEDVALUE ( FactData[Sens Metric] )
+>> RETURN SWITCH ( TRUE (),
+>>     CONTAINSSTRING ( it, "Solvency Ratio" ), "0%",
+>>     m = "Solvency", "+0.0 pp;-0.0 pp;0.0 pp",
+>>     "#,##0;-#,##0;-" )
+>>
+>> (без ">>" в начале строк). Если "Dinamico" нет в твоей версии — напиши мне.
+
+Sens NR =
+CALCULATE ( [Value Current], FactData[Topic] = "Sensitivities", FactData[Sens Metric] = "Net Result" )
+
+Sens Ratio pp =
+VAR ppFactor = 100
+RETURN CALCULATE ( [Value Current], FactData[Topic] = "Sensitivities", FactData[Sens Metric] = "Solvency" ) * ppFactor
+
+>> Коэффициент до шоков: строка "Solvency Ratio (%)" этого же листа (в %)
+Sens Base Ratio =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[Sens Line], FactData[Sens Order], FactData[Sens Shock], FactData[Sens Metric] ),
+    FactData[Topic] = "Sensitivities", CONTAINSSTRING ( FactData[Item], "Solvency Ratio" ) ) * 100
+
+Sens Ratio After =
+IF ( NOT ISBLANK ( [Sens Ratio pp] ), [Sens Base Ratio] + [Sens Ratio pp] )
+
+
+>> ШАГ 4. КОММЕНТАРИЙ
+>> Без выбора: последний год плана. Клик по ячейке: этот год. Клик по шоку: этот шок.
+
+Sens Comment =
+VAR hardLim = 110
+VAR softLim = 130
+VAR fmt  = "#,##0.0"
 VAR fmtP = "+0.0;-0.0;0.0"
 VAR nl   = UNICHAR ( 10 )
 VAR y    = MAX ( FactData[Year] )
-VAR nEnt = CALCULATE ( DISTINCTCOUNT ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency AoM" )
+VAR nEnt = CALCULATE ( DISTINCTCOUNT ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Sensitivities" )
 VAR who  = IF ( nEnt = 1,
-               CALCULATE ( SELECTEDVALUE ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Solvency AoM" ),
+               CALCULATE ( SELECTEDVALUE ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Sensitivities" ),
                nEnt & " companies (simple sum)" )
-VAR r0   = CALCULATE ( [AoM Ratio BoP], FactData[Year] = y )
-VAR r1   = CALCULATE ( [AoM Ratio EoP], FactData[Year] = y )
-VAR rSol = CALCULATE ( [SOL Ratio], FactData[Year] = y )
-VAR st =
-    IF ( ISBLANK ( r1 ), "cannot be calculated",
-    IF ( r1 < hardLim, "BELOW the " & FORMAT ( hardLim, "0%" ) & " threshold: action needed",
-    IF ( r1 < softLim, "between the " & FORMAT ( hardLim, "0%" ) & " and " & FORMAT ( softLim, "0%" ) & " thresholds",
-         "above the " & FORMAT ( softLim, "0%" ) & " threshold" ) ) )
-VAR lines =
+VAR base = CALCULATE ( [Sens Base Ratio], FactData[Year] = y )
+VAR shocks =
     CALCULATETABLE (
-        ADDCOLUMNS ( VALUES ( FactData[AoM Line] ), "@pp", [AoM Ratio Walk] ),
+        ADDCOLUMNS ( VALUES ( FactData[Sens Shock] ), "@pp", [Sens Ratio pp], "@nr", [Sens NR] ),
         REMOVEFILTERS ( DimItem ),
-        REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-        FactData[Topic] = "Solvency AoM", FactData[Year] = y )
-VAR eofPP = SUMX ( FILTER ( lines, LEFT ( FactData[AoM Line], 3 ) = "EOF" && NOT CONTAINSSTRING ( FactData[AoM Line], "(BoP)" ) ), [@pp] )
-VAR scrPP = SUMX ( FILTER ( lines, LEFT ( FactData[AoM Line], 3 ) = "SCR" ), [@pp] )
-VAR cats =
-    CALCULATETABLE (
-        ADDCOLUMNS ( VALUES ( FactData[AoM Category] ), "@pp", [AoM Ratio by Category] * 100 ),
-        REMOVEFILTERS ( DimItem ),
-        REMOVEFILTERS ( FactData[AoM Line], FactData[AoM Order], FactData[AoM Category], FactData[AoM Category Order] ),
-        FactData[Topic] = "Solvency AoM", FactData[Year] = y )
-VAR movers  = FILTER ( cats, NOT CONTAINSSTRING ( FactData[AoM Category], "Solvency Ratio" ) && [@pp] <> 0 )
-VAR top3Txt = CONCATENATEX ( TOPN ( 3, movers, ABS ( [@pp] ), DESC ),
-                  FactData[AoM Category] & " (" & FORMAT ( [@pp], fmtP ) & " pp)", "; ", ABS ( [@pp] ), DESC )
-VAR chkE = ROUND ( CALCULATE ( [AoM Check EOF], FactData[Year] = y ), 0 )
-VAR chkS = ROUND ( CALCULATE ( [AoM Check SCR], FactData[Year] = y ), 0 )
+        REMOVEFILTERS ( FactData[Sens Line], FactData[Sens Order], FactData[Sens Shock], FactData[Sens Metric] ),
+        FactData[Topic] = "Sensitivities", FactData[Year] = y )
+VAR real = FILTER ( shocks, NOT ISBLANK ( FactData[Sens Shock] )
+                            && NOT ( LEFT ( FactData[Sens Shock], 1 ) IN { "[", "<" } )
+                            && ( [@pp] <> 0 || [@nr] <> 0 ) )
+VAR worst   = TOPN ( 1, real, [@pp], ASC )
+VAR wName   = MAXX ( worst, FactData[Sens Shock] )
+VAR wPP     = MAXX ( worst, [@pp] )
+VAR wAfter  = base + wPP
+VAR worstNR = TOPN ( 1, FILTER ( real, [@nr] < 0 ), [@nr], ASC )
+VAR nBreach = COUNTROWS ( FILTER ( real, base + [@pp] < hardLim ) )
+VAR allTxt  = CONCATENATEX ( FILTER ( real, [@pp] <> 0 ),
+                  "- " & FactData[Sens Shock] & ": " & FORMAT ( [@pp], fmtP ) & " pp", nl, [@pp], ASC )
 VAR pageText =
-    "SOLVENCY RATIO MOVEMENT " & y & ": " & UPPER ( who ) & nl & nl
-    & "Solvency ratio moved from " & FORMAT ( r0, "0.0%" ) & " to " & FORMAT ( r1, "0.0%" )
-    & " (" & FORMAT ( ( r1 - r0 ) * 100, fmtP ) & " pp), " & st & "." & nl
-    & "Own funds movements: " & FORMAT ( eofPP, fmtP ) & " pp; SCR movements: " & FORMAT ( scrPP, fmtP ) & " pp." & nl
-    & IF ( top3Txt <> "", "Main drivers: " & top3Txt & ".", "No movements reported." )
-    & nl & nl
-    & IF ( chkE = 0 && chkS = 0, "Check: EOF and SCR movements reconcile with the closing balances.",
-           "Check: movements do not reconcile (EOF diff " & FORMAT ( chkE, fmt ) & ", SCR diff " & FORMAT ( chkS, fmt ) & "). Please review the input file." )
-    & IF ( NOT ISBLANK ( rSol ) && ROUND ( ( r1 - rSol ) * 1000, 0 ) <> 0,
-           nl & "Note: closing ratio differs from the Solvency sheet (" & FORMAT ( rSol, "0.0%" ) & ").", "" )
-VAR cat = SELECTEDVALUE ( FactData[AoM Category] )
-VAR catLines =
-    CALCULATETABLE (
-        ADDCOLUMNS ( VALUES ( FactData[AoM Line] ), "@pp", [AoM Ratio Walk], "@v", [Value Current] ),
-        FactData[Topic] = "Solvency AoM", FactData[Year] = y )
-VAR eofV = SUMX ( FILTER ( catLines, LEFT ( FactData[AoM Line], 3 ) = "EOF" ), [@v] )
-VAR scrV = SUMX ( FILTER ( catLines, LEFT ( FactData[AoM Line], 3 ) = "SCR" ), [@v] )
-VAR eofP = SUMX ( FILTER ( catLines, LEFT ( FactData[AoM Line], 3 ) = "EOF" ), [@pp] )
-VAR scrP = SUMX ( FILTER ( catLines, LEFT ( FactData[AoM Line], 3 ) = "SCR" ), [@pp] )
+    "SENSITIVITIES " & y & ": " & UPPER ( who ) & nl & nl
+    & IF ( COUNTROWS ( real ) = 0, "No sensitivity results reported for " & y & ".",
+           "Solvency ratio before shocks: " & FORMAT ( base, "0" ) & "%." & nl
+           & "Most severe shock: " & wName & " (" & FORMAT ( wPP, fmtP ) & " pp), ratio after shock "
+           & FORMAT ( wAfter, "0" ) & "%"
+           & IF ( wAfter < hardLim, ": BELOW the " & hardLim & "% threshold.",
+                  IF ( wAfter < softLim, ": between the " & hardLim & "% and " & softLim & "% thresholds.",
+                       ": still above the " & softLim & "% threshold." ) ) & nl
+           & IF ( nBreach > 0, nBreach & " shock(s) would bring the ratio below " & hardLim & "%.",
+                  "No shock brings the ratio below " & hardLim & "%." ) & nl
+           & IF ( NOT ISEMPTY ( worstNR ),
+                  "Largest hit on Local GAAP net result: " & MAXX ( worstNR, FactData[Sens Shock] )
+                  & " (" & FORMAT ( MAXX ( worstNR, [@nr] ), fmt ) & ").",
+                  "No material impact on Local GAAP net result." )
+           & nl & nl & "Impact on the solvency ratio:" & nl & allTxt )
+VAR sh  = SELECTEDVALUE ( FactData[Sens Shock] )
+VAR pp  = CALCULATE ( [Sens Ratio pp], FactData[Year] = y )
+VAR nr  = CALCULATE ( [Sens NR], FactData[Year] = y )
+VAR aft = base + pp
 VAR rowText =
-    UPPER ( cat ) & " " & y & ": " & who & nl & nl
-    & IF ( CONTAINSSTRING ( cat, "Solvency Ratio" ),
-           "Ratio: " & FORMAT ( IF ( CONTAINSSTRING ( cat, "(BoP)" ), r0, r1 ), "0.0%" ) & ".",
-           "Impact on the solvency ratio: " & FORMAT ( eofP + scrP, fmtP ) & " pp." & nl
-           & "Own funds: " & FORMAT ( eofV + 0, fmt ) & " (" & FORMAT ( eofP + 0, fmtP ) & " pp); "
-           & "SCR: " & FORMAT ( scrV + 0, fmt ) & " (" & FORMAT ( scrP + 0, fmtP ) & " pp)."
-           & IF ( CONTAINSSTRING ( cat, "o/w" ), nl & "Sub-item: already included in the line above.", "" ) )
-RETURN IF ( HASONEVALUE ( FactData[AoM Category] ), rowText, pageText )
+    UPPER ( sh ) & " " & y & ": " & who & nl & nl
+    & "Impact on Local GAAP net result: " & FORMAT ( nr + 0, fmt ) & nl
+    & "Impact on solvency ratio: " & FORMAT ( pp + 0, fmtP ) & " pp, from " & FORMAT ( base, "0" )
+    & "% to " & FORMAT ( aft, "0" ) & "%"
+    & IF ( aft < hardLim, ": BELOW the " & hardLim & "% threshold.",
+           IF ( aft < softLim, ": between the thresholds.", "." ) )
+RETURN IF ( HASONEVALUE ( FactData[Sens Shock] ) && NOT ISBLANK ( sh ), rowText, pageText )
+
+
+>> ШАГ 5. СТРАНИЦА "Sensitivity analyses on net result and solvency"
+>>
+>> Фильтр страницы: Topic = Sensitivities; PeriodType = Actual, Forecast, Plan.
+>> Срезы: Entity (можно несколько), Scale = Millions. RefScenario/CompScenario не нужны.
+>>
+>> a) МАТРИЦА как в Excel
+>>    Righe:   Entity, под ним Sens Line   (компании одна под другой, как в Excel)
+>>    Colonne: DimPeriod[Period]
+>>    Valori:  Sens Value
+>>    Фильтр визуала: Sens Line "non è vuoto"
+>>    Formato > Subtotali di riga: Disattivato; Totali di colonna: Disattivato
+>>    Чтобы видеть заголовки "Impact of Sensitivities on ..." (у них нет цифр):
+>>      в Righe стрелка у Sens Line > "Mostra elementi senza dati"
+>>    Цвет: Formattazione condizionale > Colore carattere > Regole:
+>>      Sens Value < 0 -> красный; > 0 -> зелёный (только на шоки — ок и для всех)
+>>
+>> b) "ТОРНАДО" по коэффициенту (последний год или выбранный)
+>>    Grafico a barre raggruppate: Asse Y = Sens Shock, Asse X = Sens Ratio pp
+>>    Фильтр визуала: Sens Metric = Solvency; Year = 2029 (или срез Year)
+>>    Ordina > Sens Ratio pp > Crescente (худший шок сверху)
+>>
+>> c) КАРТОЧКИ: Sens Base Ratio (подпись "Solvency ratio before shocks, %"),
+>>    и минимальный ratio после шоков — по желанию.
+>>
+>> d) КОММЕНТАРИЙ: таблица с Sens Comment, A capo automatico = Attivato.
+
+
+>> ПРОВЕРКА по твоему фото Excel (Cajamar Vida, ES005, Scale = Millions)
+>>   Total Distributions  Act 2025 = -82;  Local GAAP Net Result Act 2025 = 82
+>>   Solvency Ratio (%)   Act 2025 = 208%; Plan 2029 = 216%
+>>   No Volatility Adjustment  Act 2025 = +25.1 pp
+>>   +50 bps Interest Rates    Act 2025 = -3.7 pp
+>>   -25% Equity               Act 2025 = -1.2 pp
