@@ -9,12 +9,11 @@
 >>    Act 2025 MV | Expected 2026 MV | Net Balance 2027 (Redemptions, Purchases,
 >>    Sales, Net Balance) | SAA 2027 (Target MV, Target %, Lower, Upper)
 >>    + Total MV, Duration Fixed Income, Duration Gap
->>    У Company #1 (Life/Non-Life) ДВЕ такие таблицы (8-22 и 24-37).
->>    Предположение: первая = Life, вторая = Non-Life. Если не так — скажи.
+>>    У КАЖДОЙ компании две такие таблицы (DebugSAA: блоки 1-2, 4-5, 7-8).
+>>    Читаем: первая = Life, вторая = Non-Life (у Life-компании вторая пустая).
 >> B) ТАБЛИЦА СПРАВА (AC-AG): Sales & Redemptions, Current Yield %,
 >>    Total Return Yield %, Current Income, Total Return.
->>    Заголовок без годов -> текущий парсер её НЕ видит. Это и есть доработка
->>    engine: отдельная функция fnSAAYields (другие страницы не трогает).
+>>    Парсер читает её вместе с блоком (Period = SAA 2027). Доработка не нужна.
 >> C) SCR ABSORPTION (строки 41-53): Net SCR 2026 | SCR Purchases 2027 |
 >>    SCR Sales & Redemptions 2027. Парсер v4 читает (двойной заголовок).
 >> D) ПАРАМЕТРЫ (55-57): BU Return on Risk Capital, PH's Participation %,
@@ -33,67 +32,11 @@
 >> Если ERROR или N странное — пришли фото этой строки.
 
 
->> ШАГ 1. ФУНКЦИЯ fnSAAYields  (таблица справа AC-AG)
->> Home > Nuova origine > Query vuota > Editor avanzato > вставить всё > Fine
->> > переименовать запрос в  fnSAAYields  (Carica: выкл.)
-
-(Sheet as table, Fact as table) as table =>
-let
-    Clean = Table.ReplaceErrorValues(Sheet, List.Transform(Table.ColumnNames(Sheet), each {_, null})),
-    Rows  = List.Buffer(Table.ToRows(Clean)),
-    Txt   = (v) => if v = null then null
-                   else Text.Trim(Text.Replace(Text.Replace(Text.From(v), "#(cr)", ""), "#(lf)", " ")),
-
-    // column of each header on the right (same column for all companies)
-    FindHdr = (t as text) =>
-        let hits = List.Combine(List.Transform(Rows, (row) =>
-                       List.Transform(
-                           List.Select(List.Positions(row), (c) => row{c} is text and Text.StartsWith(Txt(row{c}), t)),
-                           (c) => [Col = c, Name = Txt(row{c})])))
-        in List.First(hits, null),
-    Wanted = {"Sales and Redemptions", "Current Yield of Purchases", "Total Return Yield of Purchases",
-              "Current Income of Purchases", "Total Return of Purchases"},
-    Hdrs = List.RemoveNulls(List.Transform(Wanted, FindHdr)),
-
-    // rows of the allocation tables already read by fnReadSheet (SAA 2027 columns)
-    Keys = Table.Distinct(
-               Table.SelectColumns(
-                   Table.SelectRows(Fact, each [Topic] = "SAA" and [PeriodType] = "SAA"),
-                   {"Topic", "Sheet", "BlockNo", "Block", "Entity", "Scenario", "RowNo", "Item",
-                    "IsTotal", "Period", "PeriodType", "Year"}, MissingField.Ignore),
-               {"RowNo"}),
-
-    // same Excel row, columns on the right
-    WithVals = Table.AddColumn(Keys, "X", (k) => List.Transform(Hdrs, (h) =>
-                   [Measure = h[Name],
-                    Value   = let v = Rows{k[RowNo] - 1}{h[Col]} in
-                              if v is number then v else try Number.From(v) otherwise null])),
-    Expanded = Table.ExpandRecordColumn(Table.ExpandListColumn(WithVals, "X"), "X", {"Measure", "Value"}),
-    Result   = Table.SelectRows(Expanded, each [Value] <> null)
-in
-    Result
-
-
->> ШАГ 2. ПОДКЛЮЧИТЬ К FactData
->> FactData > Editor avanzato. Внизу сейчас:
->>     in
->>         Typed            <- (у тебя может быть другое имя последнего шага)
->> Замени эти две строки на код ниже. Везде вместо Typed — имя твоего
->> последнего шага (2 места). Запятая в начале строки — так и надо.
-
-    ,SAAExtra = try fnSAAYields(Workbook{[Item = "SAA", Kind = "Sheet"]}[Data], Typed)
-                otherwise #table({}, {}),
-    Combined  = Table.Combine({Typed, SAAExtra}),
-    Final     = Table.TransformColumnTypes(Combined, {
-                    {"Value", type number}, {"Year", Int64.Type}, {"RowNo", Int64.Type},
-                    {"BlockNo", Int64.Type}, {"IsTotal", type logical},
-                    {"Topic", type text}, {"Entity", type text}, {"Block", type text},
-                    {"Item", type text}, {"Period", type text}, {"Measure", type text}})
-in
-    Final
-
->> Chiudi e applica. Проверка: FactData, Topic = SAA, Measure содержит
->> "Current Yield" -> строки есть (если ты внесла тестовые цифры в AD).
+>> ШАГ 1-2. ПРОПУСТИТЬ. DebugSAA показал: у allocation-блоков 15 столбцов
+>> (10 основных + 5 справа: Sales & Redemptions, Current Yield, Total Return
+>> Yield, Current Income, Total Return), т.е. парсер уже читает таблицу справа.
+>> fnSAAYields не нужна — она бы задвоила эти цифры.
+>> Если уже добавила её в FactData — верни конец запроса к  "in <твой шаг>".
 
 
 >> ШАГ 3. КОЛОНКИ в FactData (Visualizzazione tabella > FactData > Nuova colonna), по порядку
@@ -430,13 +373,14 @@ IF ( NOT hasData, ent & ": no SAA data filled in.",
 >>
 >> 4) Matrix "Expected SCR absorption"
 >>    Righe: SAA Line   Colonne: SAA Col   Valori: SAA Value
->>    Filtro: SAA Table = SCR
+>>    Filtri: SAA Table = SCR; SAA Order <= 15
+>>    (в SCR-блок Company #1/#2 попадает строка "Company #2"/"#3" — этот фильтр её убирает)
 >>    Если при выборе Life таблица пустая (одна SCR-таблица на компанию):
 >>    выдели слайсер SAA Part > Formato > Modifica interazioni > на этой
 >>    матрице нажми значок "Nessuna".
 >>
 >> 5) Matrix/Tabella "Parameters": Righe SAA Line, Valori SAA Value,
->>    Filtro SAA Table = Parameters.
+>>    Filtri: SAA Table = Parameters; SAA Order <= 15.
 >>
 >> 6) Grafico a barre raggruppate "Expected vs SAA target"
 >>    Asse Y: SAA Line   Valori: SAA L Exp, SAA L Tgt
