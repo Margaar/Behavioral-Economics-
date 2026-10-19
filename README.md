@@ -1,208 +1,262 @@
 =====================================================================
- SENSITIVITY ANALYSES ON NET RESULT AND SOLVENCY — сборка страницы
+ FREE TANGIBLE CAPITAL — сборка страницы с нуля
  Строки с ">>" не копировать. Копировать только код.
 =====================================================================
 
->> ШАГ 0. ПРОВЕРКА (2 минуты)
->> Dati > FactData > фильтр Topic = Sensitivities. Посмотри колонки:
->>   Section: должно быть "Impact of Sensitivities on Local GAAP Net Result"
->>            и "Impact of Sensitivities on Solvency Ratio (%)"
->>   Item:    шоки (+50 bps Interest Rates, -25% Equity...) и строки
->>            Total Distributions..., Local GAAP Net Result, Solvency Ratio (%)
->>   Entity:  Cajamar Vida S.A..., Cajamar Seguros Generales... (НЕ пусто)
->>   Value у строки "No Volatility Adjustment", ES005, Act 2025:
->>            0,251  -> ppFactor = 100 (в мерах ниже уже так)
->>            25,1   -> поменяй ppFactor на 1 в двух мерах
->> Если Entity пустой или Section другой — пришли фото, поправлю.
+>> КАК УСТРОЕН ЛИСТ (по фото Excel), у каждой компании 2 таблицы:
+>>
+>> 1) RECONCILIATION (Act 2025 ... Plan 2029): от капитала к FTC
+>>    Local GAAP Shareholders' Equity
+>>    + (-) Goodwill, (-) Revaluation, (-) Other reserves, (-) Foreseeable Div., (+) Subordinated
+>>    = LGAAP Tangible Capital (TCAP)   [o/w Not Distributable / o/w Distributable]
+>>    + LGAAP TCAP to cover Required Capital Buffer
+>>    = LGAAP TCAP after Required Buffer coverage
+>>    + (-) Not Distributable TCAP, (-) Distributable TCAP backed by Part. ...
+>>    = Tangible Capital
+>>    + (-) Tangible Capital to cover OTR - Upper Corridor
+>>    = FREE TANGIBLE CAPITAL
+>>    Проверка ES003 Plan 2027: 1482 - 316 + 40 - 384 - 216 - 343 - 101 = 162 ✓
+>>
+>> 2) YoY MOVEMENT (For 2026 ... Plan 2029): FTC (BoP) + движения = FTC (EoP)
+>>    ES003 Plan 2027: 0 + 151 - 384 + 54 - 168 + 51 + 559 - 101 = 162 ✓
 
 
->> ШАГ 1. ИСПРАВИТЬ NoScale
->> Строка "Solvency Ratio (%)" сейчас пересчитывается в тысячи.
->> Dati > FactData > колонка NoScale > заменить формулу:
-
-NoScale =
-VAR it  = UPPER ( FactData[Item] )
-VAR itw = " " & SUBSTITUTE ( SUBSTITUTE ( SUBSTITUTE ( it, "(", " " ), ")", " " ), ":", " " ) & " "
-VAR ctx = UPPER ( FactData[Block] & " " & FactData[Section] & " " & FactData[Measure] )
-RETURN
-    IF (
-        FactData[Topic] = "Sensitivities",
-        CONTAINSSTRING ( UPPER ( FactData[Section] & "" ), "SOLVENCY" ) || CONTAINSSTRING ( it, "(%)" ),
-        CONTAINSSTRING ( it, "(%)" ) || CONTAINSSTRING ( itw, " RATIO " ) || CONTAINSSTRING ( it, "P.P." )
-            || CONTAINSSTRING ( it, "TAX RATE" ) || CONTAINSSTRING ( it, "(YEARS)" )
-            || CONTAINSSTRING ( ctx, "%" ) || CONTAINSSTRING ( ctx, "COR (" )
-            || CONTAINSSTRING ( ctx, "RORC" ) || CONTAINSSTRING ( ctx, "PVNBP" )
-    )
+>> ШАГ 0. ПРОВЕРКА (3 минуты)
+>> Dati > FactData > фильтр Topic = Free Tangible Capital. Посмотри:
+>>   Block:  два названия, одно содержит "Reconciliation", другое "Movement".
+>>   Entity: названия компаний (не пусто).
+>>   Item:   строки обеих таблиц, в т.ч. "Free Tangible Capital (BoP)".
+>>   SignHint: "-" / "+" у строк (-) Goodwill..., (+) Subordinated...
+>> Если таблицы Movement нет или Block называется иначе — пришли фото
+>> (тогда поменяем одно слово в колонке FTC Table).
 
 
->> ШАГ 2. ПЯТЬ КОЛОНОК в FactData (Dati > FactData > Nuova colonna), по порядку.
->> Если Sens Metric / Sens Shock уже есть из прошлой инструкции — замени их формулы.
+>> ШАГ 1. ЧЕТЫРЕ КОЛОНКИ в FactData (Dati > FactData > Nuova colonna), по порядку
 
->> Номер строки внутри блока компании (для порядка строк как в Excel)
-Sens RelRow =
-IF ( FactData[Topic] = "Sensitivities",
+FTC Table =
+IF ( FactData[Topic] = "Free Tangible Capital",
+     IF ( CONTAINSSTRING ( FactData[Block], "Movement" ), "Movement", "Reconciliation" ) )
+
+FTC RelRow =
+IF ( FactData[Topic] = "Free Tangible Capital",
      FactData[RowNo]
      - CALCULATE ( MIN ( FactData[RowNo] ), ALLEXCEPT ( FactData, FactData[Topic], FactData[BlockNo] ) ) )
 
->> Название строки. Шоки встречаются дважды (Net Result и Solvency),
->> поэтому к строкам блока Solvency добавлен невидимый символ.
-Sens Line =
-IF ( FactData[Topic] = "Sensitivities",
-     FactData[Item]
-     & IF ( CONTAINSSTRING ( FactData[Section] & "", "Solvency" ) && NOT CONTAINSSTRING ( FactData[Item], "Solvency Ratio" ),
-            UNICHAR ( 8203 ), "" ) )
+>> Название строки; строки таблицы Movement получают невидимый символ,
+>> чтобы не смешиваться с одноимёнными строками Reconciliation
+FTC Line =
+IF ( FactData[Topic] = "Free Tangible Capital",
+     FactData[Item] & IF ( FactData[FTC Table] = "Movement", UNICHAR ( 8203 ), "" ) )
 
->> Порядок строк
-Sens Order =
-IF ( FactData[Topic] = "Sensitivities",
-     CALCULATE ( MIN ( FactData[Sens RelRow] ),
-         ALLEXCEPT ( FactData, FactData[Topic], FactData[Section], FactData[Item] ) ) )
+FTC Order =
+IF ( FactData[Topic] = "Free Tangible Capital",
+     CALCULATE ( MIN ( FactData[FTC RelRow] ),
+         ALLEXCEPT ( FactData, FactData[Topic], FactData[Block], FactData[Item] ) ) )
 
->> Только строки-шоки (без заголовков, без Distributions / Net Result / Ratio)
-Sens Shock =
-IF ( FactData[Topic] = "Sensitivities"
-         && LEFT ( FactData[Section] & "", 9 ) = "Impact of"
-         && LEFT ( FactData[Item], 9 ) <> "Impact of"
-         && NOT CONTAINSSTRING ( FactData[Item], "Solvency Ratio" ),
-     FactData[Item] )
-
->> На что влияет шок
-Sens Metric =
-IF ( NOT ISBLANK ( FactData[Sens Shock] ),
-     IF ( CONTAINSSTRING ( FactData[Section], "Solvency" ), "Solvency", "Net Result" ) )
-
->> Потом: колонка Sens Line > Ordina per colonna > Sens Order.
+>> Потом: колонка FTC Line > Ordina per colonna > FTC Order.
 
 
->> ШАГ 3. МЕРЫ (Home > Nuova misura), по одной.
+>> ШАГ 2. МЕРЫ (Home > Nuova misura), по одной
 
->> Значение для таблицы: суммы в выбранных единицах, шоки на ratio в пунктах
-Sens Value =
-VAR ppFactor = 100
-VAR v = CALCULATE ( [Value Current], FactData[Topic] = "Sensitivities" )
-RETURN IF ( SELECTEDVALUE ( FactData[Sens Metric] ) = "Solvency", v * ppFactor, v )
-
->> ФОРМАТ для Sens Value: выдели меру > Strumenti misura > Formato > "Dinamico"
->> > в строке формул выбери "Formato" (стрелка слева) и вставь:
->>
->> VAR it = SELECTEDVALUE ( FactData[Item] )
->> VAR m  = SELECTEDVALUE ( FactData[Sens Metric] )
->> RETURN SWITCH ( TRUE (),
->>     CONTAINSSTRING ( it, "Solvency Ratio" ), "0%",
->>     m = "Solvency", "+0.0 pp;-0.0 pp;0.0 pp",
->>     "#,##0;-#,##0;-" )
->>
->> (без ">>" в начале строк). Если "Dinamico" нет в твоей версии — напиши мне.
-
-Sens NR =
-CALCULATE ( [Value Current], FactData[Topic] = "Sensitivities", FactData[Sens Metric] = "Net Result" )
-
-Sens Ratio pp =
-VAR ppFactor = 100
-RETURN CALCULATE ( [Value Current], FactData[Topic] = "Sensitivities", FactData[Sens Metric] = "Solvency" ) * ppFactor
-
->> Коэффициент до шоков: строка "Solvency Ratio (%)" этого же листа (в %)
-Sens Base Ratio =
+FTC Equity =
 CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
-    REMOVEFILTERS ( FactData[Sens Line], FactData[Sens Order], FactData[Sens Shock], FactData[Sens Metric] ),
-    FactData[Topic] = "Sensitivities", CONTAINSSTRING ( FactData[Item], "Solvency Ratio" ) ) * 100
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+    CONTAINSSTRING ( FactData[Item], "Shareholders" ) )
 
-Sens Ratio After =
-IF ( NOT ISBLANK ( [Sens Ratio pp] ), [Sens Base Ratio] + [Sens Ratio pp] )
+FTC TCAP =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+    CONTAINSSTRING ( FactData[Item], "LGAAP Tangible Capital" ) )
+
+FTC Buffer =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+    CONTAINSSTRING ( FactData[Item], "to cover Required Capital Buffer" ) )
+
+FTC TC =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+    FactData[Item] = "Tangible Capital" )
+
+FTC OTR =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+    CONTAINSSTRING ( FactData[Item], "to cover OTR" ) )
+
+FTC FTC =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+    FactData[Item] = "Free Tangible Capital" )
+
+>> Проверка 1: Equity + все строки со знаком (-)/(+) + Buffer = FTC  (должно быть 0)
+FTC Check =
+[FTC Equity]
++ CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+      REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+      FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Reconciliation",
+      NOT ISBLANK ( FactData[SignHint] ) )
++ [FTC Buffer]
+- [FTC FTC]
+
+>> Проверка 2: BoP + движения = EoP  (должно быть 0)
+FTC Move Check =
+CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Movement",
+    NOT CONTAINSSTRING ( FactData[Item], "(EoP)" ) )
+- CALCULATE ( [Value Current], REMOVEFILTERS ( DimItem ),
+    REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+    FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Movement",
+    CONTAINSSTRING ( FactData[Item], "(EoP)" ) )
+
+>> Для водопада "от капитала к FTC": только стартовая строка и строки-корректировки
+FTC Bridge =
+VAR it  = SELECTEDVALUE ( FactData[Item] )
+VAR tbl = SELECTEDVALUE ( FactData[FTC Table] )
+VAR sg  = SELECTEDVALUE ( FactData[SignHint] )
+RETURN
+    IF ( tbl = "Reconciliation"
+             && ( CONTAINSSTRING ( it, "Shareholders" ) || NOT ISBLANK ( sg )
+                  || CONTAINSSTRING ( it, "to cover Required Capital Buffer" ) ),
+         [Value Current] )
+
+>> Для водопада "движение FTC за год": BoP и движения, без EoP
+FTC Move =
+VAR it  = SELECTEDVALUE ( FactData[Item] )
+VAR tbl = SELECTEDVALUE ( FactData[FTC Table] )
+RETURN IF ( tbl = "Movement" && NOT CONTAINSSTRING ( it, "(EoP)" ), [Value Current] )
+
+>> Цвет фона итоговых строк в матрицах (как в Excel)
+FTC Row Color =
+VAR it = SELECTEDVALUE ( FactData[Item] )
+RETURN
+    SWITCH ( TRUE (),
+        CONTAINSSTRING ( it, "Free Tangible Capital" ), "#F4D3B5",
+        it = "Tangible Capital"
+            || CONTAINSSTRING ( it, "Shareholders" )
+            || CONTAINSSTRING ( it, "LGAAP Tangible Capital" )
+            || CONTAINSSTRING ( it, "after Required Buffer" ), "#E3E3E3",
+        BLANK () )
 
 
->> ШАГ 4. КОММЕНТАРИЙ
->> Без выбора: последний год плана. Клик по ячейке: этот год. Клик по шоку: этот шок.
+>> ШАГ 3. КОММЕНТАРИЙ
+>> Без выбора: последний год плана. Срез/клик по ячейке: этот год. Клик по строке: строка.
 
-Sens Comment =
-VAR hardLim = 110
-VAR softLim = 130
-VAR fmt  = "#,##0.0"
-VAR fmtP = "+0.0;-0.0;0.0"
+FTC Comment =
+VAR fmt  = "#,##0"
+VAR fmtD = "+#,##0;-#,##0;0"
 VAR nl   = UNICHAR ( 10 )
-VAR y    = MAX ( FactData[Year] )
-VAR nEnt = CALCULATE ( DISTINCTCOUNT ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Sensitivities" )
+VAR yrs  = CALCULATETABLE ( VALUES ( FactData[Year] ), REMOVEFILTERS ( DimItem ),
+               REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+               FactData[Topic] = "Free Tangible Capital", NOT ISBLANK ( FactData[Value] ) )
+VAR y0   = MINX ( yrs, FactData[Year] )
+VAR y1   = MAXX ( yrs, FactData[Year] )
+VAR period = IF ( y0 = y1, "in " & y1, y0 & "-" & y1 )
+VAR nEnt = CALCULATE ( DISTINCTCOUNT ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Free Tangible Capital" )
 VAR who  = IF ( nEnt = 1,
-               CALCULATE ( SELECTEDVALUE ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Sensitivities" ),
-               nEnt & " companies (simple sum)" )
-VAR base = CALCULATE ( [Sens Base Ratio], FactData[Year] = y )
-VAR shocks =
+               CALCULATE ( SELECTEDVALUE ( FactData[Entity] ), REMOVEFILTERS ( DimItem ), FactData[Topic] = "Free Tangible Capital" ),
+               nEnt & " companies" )
+VAR ftc1 = CALCULATE ( [FTC FTC], FactData[Year] = y1 )
+VAR ftc0 = CALCULATE ( [FTC FTC], FactData[Year] = y0 )
+VAR eq1  = CALCULATE ( [FTC Equity], FactData[Year] = y1 )
+VAR tcp1 = CALCULATE ( [FTC TCAP], FactData[Year] = y1 )
+VAR buf1 = CALCULATE ( [FTC Buffer], FactData[Year] = y1 )
+VAR tc1  = CALCULATE ( [FTC TC], FactData[Year] = y1 )
+VAR otr1 = CALCULATE ( [FTC OTR], FactData[Year] = y1 )
+VAR conv = DIVIDE ( ftc1, tcp1 )
+VAR moves =
     CALCULATETABLE (
-        ADDCOLUMNS ( VALUES ( FactData[Sens Shock] ), "@pp", [Sens Ratio pp], "@nr", [Sens NR] ),
+        ADDCOLUMNS ( VALUES ( FactData[FTC Line] ), "@v", [Value Current] ),
         REMOVEFILTERS ( DimItem ),
-        REMOVEFILTERS ( FactData[Sens Line], FactData[Sens Order], FactData[Sens Shock], FactData[Sens Metric] ),
-        FactData[Topic] = "Sensitivities", FactData[Year] = y )
-VAR real = FILTER ( shocks, NOT ISBLANK ( FactData[Sens Shock] )
-                            && NOT ( LEFT ( FactData[Sens Shock], 1 ) IN { "[", "<" } )
-                            && ( [@pp] <> 0 || [@nr] <> 0 ) )
-VAR worst   = TOPN ( 1, real, [@pp], ASC )
-VAR wName   = MAXX ( worst, FactData[Sens Shock] )
-VAR wPP     = MAXX ( worst, [@pp] )
-VAR wAfter  = base + wPP
-VAR worstNR = TOPN ( 1, FILTER ( real, [@nr] < 0 ), [@nr], ASC )
-VAR nBreach = COUNTROWS ( FILTER ( real, base + [@pp] < hardLim ) )
-VAR allTxt  = CONCATENATEX ( FILTER ( real, [@pp] <> 0 ),
-                  "- " & FactData[Sens Shock] & ": " & FORMAT ( [@pp], fmtP ) & " pp", nl, [@pp], ASC )
+        REMOVEFILTERS ( FactData[FTC Line], FactData[FTC Order], FactData[FTC Table] ),
+        FactData[Topic] = "Free Tangible Capital", FactData[FTC Table] = "Movement",
+        NOT CONTAINSSTRING ( FactData[Item], "(BoP)" ), NOT CONTAINSSTRING ( FactData[Item], "(EoP)" ) )
+VAR top3Txt =
+    CONCATENATEX ( TOPN ( 3, FILTER ( moves, [@v] <> 0 ), ABS ( [@v] ), DESC ),
+        SUBSTITUTE ( FactData[FTC Line], UNICHAR ( 8203 ), "" ) & " (" & FORMAT ( [@v], fmtD ) & ")",
+        "; ", ABS ( [@v] ), DESC )
+VAR chk  = ROUND ( CALCULATE ( [FTC Check], FactData[Year] = y1 ), 0 )
+VAR chkM = ROUND ( CALCULATE ( [FTC Move Check], FactData[Year] = y1 ), 0 )
 VAR pageText =
-    "SENSITIVITIES " & y & ": " & UPPER ( who ) & nl & nl
-    & IF ( COUNTROWS ( real ) = 0, "No sensitivity results reported for " & y & ".",
-           "Solvency ratio before shocks: " & FORMAT ( base, "0" ) & "%." & nl
-           & "Most severe shock: " & wName & " (" & FORMAT ( wPP, fmtP ) & " pp), ratio after shock "
-           & FORMAT ( wAfter, "0" ) & "%"
-           & IF ( wAfter < hardLim, ": BELOW the " & hardLim & "% threshold.",
-                  IF ( wAfter < softLim, ": between the " & hardLim & "% and " & softLim & "% thresholds.",
-                       ": still above the " & softLim & "% threshold." ) ) & nl
-           & IF ( nBreach > 0, nBreach & " shock(s) would bring the ratio below " & hardLim & "%.",
-                  "No shock brings the ratio below " & hardLim & "%." ) & nl
-           & IF ( NOT ISEMPTY ( worstNR ),
-                  "Largest hit on Local GAAP net result: " & MAXX ( worstNR, FactData[Sens Shock] )
-                  & " (" & FORMAT ( MAXX ( worstNR, [@nr] ), fmt ) & ").",
-                  "No material impact on Local GAAP net result." )
-           & nl & nl & "Impact on the solvency ratio:" & nl & allTxt )
-VAR sh  = SELECTEDVALUE ( FactData[Sens Shock] )
-VAR pp  = CALCULATE ( [Sens Ratio pp], FactData[Year] = y )
-VAR nr  = CALCULATE ( [Sens NR], FactData[Year] = y )
-VAR aft = base + pp
+    "FREE TANGIBLE CAPITAL: " & UPPER ( who ) & ", " & period & nl & nl
+    & IF ( ftc1 = 0 || ISBLANK ( ftc1 ),
+           "No Free Tangible Capital in " & y1 & ": the required capital buffer and the OTR coverage absorb the whole tangible capital.",
+           "Free Tangible Capital " & y1 & ": " & FORMAT ( ftc1, fmt )
+           & IF ( y0 <> y1, " (" & FORMAT ( ftc1 - ftc0, fmtD ) & " vs " & y0 & ")", "" ) & "." )
+    & nl
+    & "Bridge " & y1 & ": shareholders' equity " & FORMAT ( eq1 + 0, fmt )
+    & " → LGAAP tangible capital " & FORMAT ( tcp1 + 0, fmt )
+    & "; required buffer " & FORMAT ( buf1 + 0, fmt )
+    & " → tangible capital " & FORMAT ( tc1 + 0, fmt )
+    & "; OTR upper corridor " & FORMAT ( otr1 + 0, fmt )
+    & " → FTC " & FORMAT ( ftc1 + 0, fmt ) & "."
+    & IF ( tcp1 > 0, nl & FORMAT ( conv, "0%" ) & " of LGAAP tangible capital is free.", "" )
+    & IF ( top3Txt <> "", nl & "Main drivers of the FTC movement " & period & ": " & top3Txt & ".", "" )
+    & nl & nl
+    & IF ( chk = 0 && chkM = 0, "Check: reconciliation and YoY movement are consistent.",
+           "Check: differences found (reconciliation " & FORMAT ( chk, fmtD ) & ", movement " & FORMAT ( chkM, fmtD )
+           & ") in " & y1 & ". Please review the input file." )
+VAR ln  = SELECTEDVALUE ( FactData[FTC Line] )
+VAR byYear =
+    CONCATENATEX ( yrs,
+        FactData[Year] & ": " & FORMAT ( CALCULATE ( [Value Current], FactData[Topic] = "Free Tangible Capital" ) + 0, fmt ),
+        " | ", FactData[Year], ASC )
 VAR rowText =
-    UPPER ( sh ) & " " & y & ": " & who & nl & nl
-    & "Impact on Local GAAP net result: " & FORMAT ( nr + 0, fmt ) & nl
-    & "Impact on solvency ratio: " & FORMAT ( pp + 0, fmtP ) & " pp, from " & FORMAT ( base, "0" )
-    & "% to " & FORMAT ( aft, "0" ) & "%"
-    & IF ( aft < hardLim, ": BELOW the " & hardLim & "% threshold.",
-           IF ( aft < softLim, ": between the thresholds.", "." ) )
-RETURN IF ( HASONEVALUE ( FactData[Sens Shock] ) && NOT ISBLANK ( sh ), rowText, pageText )
+    UPPER ( SUBSTITUTE ( ln, UNICHAR ( 8203 ), "" ) ) & ": " & who & nl & nl
+    & "By year: " & byYear & "."
+    & IF ( ftc1 <> 0 && NOT CONTAINSSTRING ( ln, "Free Tangible Capital" ),
+           nl & "In " & y1 & " this line equals "
+           & FORMAT ( DIVIDE ( CALCULATE ( [Value Current], FactData[Topic] = "Free Tangible Capital", FactData[Year] = y1 ), ftc1 ), "0%" )
+           & " of Free Tangible Capital.", "" )
+RETURN IF ( HASONEVALUE ( FactData[FTC Line] ), rowText, pageText )
 
 
->> ШАГ 5. СТРАНИЦА "Sensitivity analyses on net result and solvency"
+>> ШАГ 4. СТРАНИЦА "Free Tangible Capital"
 >>
->> Фильтр страницы: Topic = Sensitivities; PeriodType = Actual, Forecast, Plan.
->> Срезы: Entity (можно несколько), Scale = Millions. RefScenario/CompScenario не нужны.
+>> Фильтр страницы: Topic = Free Tangible Capital; PeriodType = Actual, Forecast, Plan.
+>> Срезы: Entity (синхронизирован), Scale = Millions. RefScenario/CompScenario не нужны.
 >>
->> a) МАТРИЦА как в Excel
->>    Righe:   Entity, под ним Sens Line   (компании одна под другой, как в Excel)
->>    Colonne: DimPeriod[Period]
->>    Valori:  Sens Value
->>    Фильтр визуала: Sens Line "non è vuoto"
->>    Formato > Subtotali di riga: Disattivato; Totali di colonna: Disattivato
->>    Чтобы видеть заголовки "Impact of Sensitivities on ..." (у них нет цифр):
->>      в Righe стрелка у Sens Line > "Mostra elementi senza dati"
->>    Цвет: Formattazione condizionale > Colore carattere > Regole:
->>      Sens Value < 0 -> красный; > 0 -> зелёный (только на шоки — ок и для всех)
+>> a) МАТРИЦА 1 "Free Tangible Capital Reconciliation vs Local GAAP Shareholders' Equity"
+>>    Righe: FTC Line   Colonne: DimPeriod[Period]   Valori: Value Current
+>>    Фильтр визуала: FTC Table = Reconciliation
+>>    Totali di riga / colonna: Disattivato
+>>    Фон итогов: Formattazione condizionale > Colore sfondo > Stile "Valore campo" > FTC Row Color
 >>
->> b) "ТОРНАДО" по коэффициенту (последний год или выбранный)
->>    Grafico a barre raggruppate: Asse Y = Sens Shock, Asse X = Sens Ratio pp
->>    Фильтр визуала: Sens Metric = Solvency; Year = 2029 (или срез Year)
->>    Ordina > Sens Ratio pp > Crescente (худший шок сверху)
+>> b) МАТРИЦА 2 "Free Tangible Capital YoY Movement"
+>>    Копия матрицы 1, фильтр визуала FTC Table = Movement
 >>
->> c) КАРТОЧКИ: Sens Base Ratio (подпись "Solvency ratio before shocks, %"),
->>    и минимальный ratio после шоков — по желанию.
+>>    Если выбрано несколько компаний, поставь в Righe сначала Entity, потом FTC Line —
+>>    будет как в Excel: компания, под ней две таблицы.
 >>
->> d) КОММЕНТАРИЙ: таблица с Sens Comment, A capo automatico = Attivato.
+>> c) ВОДОПАД "From equity to Free Tangible Capital" (один год)
+>>    Categoria: FTC Line   Asse Y: FTC Bridge
+>>    Фильтр визуала: FTC Table = Reconciliation
+>>    Ordina asse > FTC Line > Crescente
+>>    Срез Year (Selezione singola) рядом; Modifica interazioni: влияет только на водопады.
+>>    Первый столбец = Equity, последний "Totale" = FTC.
+>>
+>> d) ВОДОПАД "FTC movement" (один год)
+>>    Categoria: FTC Line   Asse Y: FTC Move
+>>    Фильтр визуала: FTC Table = Movement
+>>    Первый столбец = FTC (BoP), "Totale" = FTC (EoP).
+>>
+>> e) СТОЛБЦЫ "FTC by company"
+>>    Istogramma in pila: Asse X = Period (PeriodType = Plan), Asse Y = FTC FTC, Legenda = Entity
+>>    Срез Entity > Modifica interazioni > над этим графиком "Nessuno" (видно все компании).
+>>
+>> f) КОММЕНТАРИЙ: таблица с FTC Comment, A capo automatico = Attivato.
+>>    Карточки (по желанию): FTC FTC, FTC Check, FTC Move Check.
 
 
->> ПРОВЕРКА по твоему фото Excel (Cajamar Vida, ES005, Scale = Millions)
->>   Total Distributions  Act 2025 = -82;  Local GAAP Net Result Act 2025 = 82
->>   Solvency Ratio (%)   Act 2025 = 208%; Plan 2029 = 216%
->>   No Volatility Adjustment  Act 2025 = +25.1 pp
->>   +50 bps Interest Rates    Act 2025 = -3.7 pp
->>   -25% Equity               Act 2025 = -1.2 pp
+>> ПРОВЕРКА (Generali España ES003, Scale = Millions)
+>>   Shareholders' Equity: Act 2025 = 688, Plan 2027 = 1.482
+>>   LGAAP TCAP:           Act 2025 = 483, Plan 2027 = 822
+>>   Free Tangible Capital: Act 2025 = 0, Plan 2027 = 162, Plan 2028 = 214, Plan 2029 = 125
+>>   Водопад Plan 2027: старт 1.482 → Totale 162
+>>   FTC Check и FTC Move Check = 0 (± округление)
