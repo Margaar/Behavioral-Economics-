@@ -15,36 +15,88 @@
 >> строк во входной таблице другие — поправлю одно слово.
 
 
+>> ===== РЕЗУЛЬТАТ ПРОВЕРКИ (твои фото) и 2 правки в Power Query =====
+>> Remittance by Company: 4 блока ok. Во входе только Dividends / Interim (со знаком -).
+>>    У Company #4 строка Previous не распознана (Group пустой): previous-годы
+>>    попали в Current -> ПРАВКА 2.
+>> Life KPIs: 8 блоков ok (NBV / PVNBP / NB Guar. / IF Guar. x 2 компании),
+>>    но Entity ПУСТОЙ: ярлык "Company #1" стоит не слева от таблицы -> ПРАВКА 1.
+>>    Вторая таблица — PVNBP в EUR, маржа считается мерой LK Margin.
+>> Non-Life KPIs: 4 блока ok, Entity / Section / Gross-Net ok, SII 2025-2029
+>>    = -1 / 48 / 98 / 128 / 143 как в Excel.
+
+>> ПРАВКА 1. fnReadSheet: искать "Company #..." сначала слева (как сейчас),
+>> потом в остальных колонках окна, потом во всей строке.
+>> fnReadSheet > Editor avanzato > найди блок от "EntOf = (h) =>" до строки
+>> "...EntNames, (n) => Text.StartsWith(Text.Upper(t), n))))), null),"
+>> и замени его целиком на:
+
+    EntOf = (h) =>
+        let p0 = P0Of(h),
+            Rws   = List.Select(List.Numbers(h, 7, -1), (r) => r >= 0),
+            IsEnt = (t) => t <> null and
+                       (Text.StartsWith(Text.Upper(t), "COMPANY #")
+                        or List.AnyTrue(List.Transform(EntNames, (n) => Text.StartsWith(Text.Upper(t), n)))),
+            Find  = (cols as list) => List.First(List.Select(List.Combine(List.Transform(Rws,
+                        (r) => List.Transform(cols, (c) => Txt(Rows{r}{c})))), IsEnt), null),
+            L = Find(List.Reverse(List.Select(WinCols, (c) => c < p0))),
+            R = if L <> null then L else Find(List.Select(WinCols, (c) => c >= p0)),
+            A = if R <> null then R else Find(List.Numbers(0, NC))
+        in A,
+
+>> (запятая в конце нужна: дальше идёт строка EntFill = ...)
+>> Другие страницы не меняются: где компания находилась слева, она находится так же.
+
+>> ПРАВКА 2. FactData: если у Remittance by Company нет группы Current/Previous,
+>> второй одинаковый год в той же строке = Previous.
+>> FactData > Editor avanzato. Внизу:   in  <ПоследнийШаг>
+>> замени эти 2 строки на (вместо Typed — имя твоего последнего шага, 2 места):
+
+    ,Idx     = Table.AddIndexColumn(Typed, "FIdx", 0, 1, Int64.Type),
+    FirstI   = Table.Group(Table.SelectRows(Idx, each [Topic] = "Remittance by Company"),
+                   {"BlockNo", "RowNo", "Period"}, {{"FirstIdx", each List.Min([FIdx]), Int64.Type}, {"Cnt", each Table.RowCount(_), Int64.Type}}),
+    Joined   = Table.NestedJoin(Idx, {"BlockNo", "RowNo", "Period"}, FirstI, {"BlockNo", "RowNo", "Period"},
+                   "F", JoinKind.LeftOuter),
+    Expanded2 = Table.ExpandTableColumn(Joined, "F", {"FirstIdx", "Cnt"}),
+    Scen     = Table.AddColumn(Expanded2, "Scen", each
+                   if [Topic] = "Remittance by Company" and ( [Group] = null or [Group] = "" )
+                      and [FirstIdx] <> null and [FIdx] > [FirstIdx]
+                   then "Previous" else [Scenario], type text),
+    Final    = Table.RenameColumns(Table.RemoveColumns(Scen, {"Scenario", "FIdx", "FirstIdx", "Cnt"}), {{"Scen", "Scenario"}})
+in
+    Final
+
+>> ПРОВЕРКА после Chiudi e applica: FactData, Topic = Remittance by Company, Entity = Company #4,
+>> Item = Dividends Outflow, Period 2026:  Current = -171.6, Previous = -388.7.
+>> Если наоборот (Current -388.7) — в Excel previous-колонки стоят слева; тогда
+>> в строке Scen замени  [FIdx] > [FirstIdx]  на  ( [Cnt] > 1 and [FIdx] = [FirstIdx] ).
+>> Life KPIs: Entity теперь Company #1 / Company #2.
+
+
 #####################################################################
  A) REMITTANCE BY COMPANY
 #####################################################################
 
 >> Колонки не нужны. Меры (Home > Nuova misura):
 
-RBC Total =
-CALCULATE ( SUM ( FactData[Value] ),
-    FactData[Topic] = "Remittance by Company", FactData[Scenario] = "Current",
-    CONTAINSSTRING ( FactData[Item], "Total Remittance" )
-        && NOT CONTAINSSTRING ( FactData[Item], "Previous" ) )
-
+>> Во входной таблице есть только Dividends Outflow и Interim Dividends Outflow,
+>> со знаком минус (outflow). Total = сумма двух, со знаком плюс, как в выходной таблице.
 RBC Dividends =
-CALCULATE ( SUM ( FactData[Value] ),
+- CALCULATE ( SUM ( FactData[Value] ),
     FactData[Topic] = "Remittance by Company", FactData[Scenario] = "Current",
     CONTAINSSTRING ( FactData[Item], "Dividends Outflow" )
         && NOT CONTAINSSTRING ( FactData[Item], "Interim" ) )
 
 RBC Interim =
-CALCULATE ( SUM ( FactData[Value] ),
+- CALCULATE ( SUM ( FactData[Value] ),
     FactData[Topic] = "Remittance by Company", FactData[Scenario] = "Current",
     CONTAINSSTRING ( FactData[Item], "Interim" ) )
 
->> Previous: либо строки в блоке "Previous...", либо строка "Previous Planned Remittance"
+RBC Total = [RBC Dividends] + [RBC Interim]
+
 RBC Previous =
-CALCULATE ( SUM ( FactData[Value] ),
-    FactData[Topic] = "Remittance by Company",
-    FILTER ( ALL ( FactData[Scenario], FactData[Item] ),
-        ( FactData[Scenario] = "Previous" && CONTAINSSTRING ( FactData[Item], "Total Remittance" ) )
-        || CONTAINSSTRING ( FactData[Item], "Previous Planned" ) ) )
+- CALCULATE ( SUM ( FactData[Value] ),
+    FactData[Topic] = "Remittance by Company", FactData[Scenario] = "Previous" )
 
 RBC Delta =
 IF ( NOT ISBLANK ( [RBC Previous] ), [RBC Total] - [RBC Previous] )
@@ -147,7 +199,7 @@ IF ( FactData[Topic] = "Life KPIs",
          COUNTROWS ( FILTER ( blk, CONTAINSSTRING ( FactData[Item], "NB Premiums" ) ) ) > 0, "NB Guarantees",
          COUNTROWS ( FILTER ( blk, CONTAINSSTRING ( FactData[Item], "VNP" )
                                    || CONTAINSSTRING ( FactData[Item], "NBV official" ) ) ) > 0, "NBV",
-         "NBV Margin" ) )
+         "PVNBP" ) )
 
 >> Номер строки внутри таблицы (0 = первая строка)
 LK Order =
@@ -160,7 +212,7 @@ IF ( FactData[Topic] = "Life KPIs",
 LK Line =
 IF ( FactData[Topic] = "Life KPIs",
      FactData[Item]
-     & SWITCH ( FactData[LK Table], "NBV Margin", UNICHAR ( 8203 ),
+     & SWITCH ( FactData[LK Table], "PVNBP", UNICHAR ( 8203 ),
                 "IF Guarantees", UNICHAR ( 8203 ) & UNICHAR ( 8203 ), "" ) )
 
 >> Сортировка: LK Line > Ordina per colonna > LK Order.
@@ -174,8 +226,24 @@ LK Value = SUM ( FactData[Value] )
 >> Формат LK Value: Dinamico >
 VAR t  = SELECTEDVALUE ( FactData[LK Table] )
 VAR it = SELECTEDVALUE ( FactData[LK Line] )
-RETURN IF ( t = "NBV Margin" || CONTAINSSTRING ( it, "(%)" ) || CONTAINSSTRING ( it, "Guarantee-linked" )
+RETURN IF ( CONTAINSSTRING ( it, "(%)" ) || CONTAINSSTRING ( it, "Guarantee-linked" )
             || CONTAINSSTRING ( it, "Average Guarantee" ), "0.0%", "#,##0" )
+
+>> Маржа NBV / PVNBP (во входе есть только PVNBP в EUR; маржу считаем, как в Excel)
+LK Margin =
+VAR it    = SUBSTITUTE ( SELECTEDVALUE ( FactData[LK Line] ), UNICHAR ( 8203 ), "" )
+VAR isTot = CONTAINSSTRING ( it, "Total" )
+VAR pv = CALCULATE ( SUM ( FactData[Value] ), REMOVEFILTERS ( FactData[LK Line], FactData[LK Table] ),
+             FactData[Topic] = "Life KPIs", FactData[LK Table] = "PVNBP",
+             FILTER ( ALL ( FactData[Item] ),
+                 IF ( isTot, CONTAINSSTRING ( FactData[Item], "Total" ), FactData[Item] = it ) ) )
+VAR nb = CALCULATE ( SUM ( FactData[Value] ), REMOVEFILTERS ( FactData[LK Line], FactData[LK Table] ),
+             FactData[Topic] = "Life KPIs", FactData[LK Table] = "NBV",
+             FILTER ( ALL ( FactData[Item] ),
+                 IF ( isTot, CONTAINSSTRING ( FactData[Item], "Total NBV" ), FactData[Item] = it ) ) )
+RETURN DIVIDE ( nb, pv )
+
+>> Формат LK Margin: Percentuale, 1 decimale.
 
 LK Comment =
 VAR fmt  = "#,##0"
@@ -232,10 +300,11 @@ VAR recX = FILTER ( ADDCOLUMNS ( rec, "@v",
 VAR recT = TOPN ( 1, recX, ABS ( [@v] ), DESC )
 VAR recN = MAXX ( recT, FactData[LK Line] )
 VAR recV = MAXX ( recT, [@v] )
-VAR mgZ = CALCULATE ( SUM ( FactData[Value] ),
+VAR pvZ = CALCULATE ( SUM ( FactData[Value] ),
              REMOVEFILTERS ( FactData[LK Line], DimPeriod, FactData[Period], FactData[Year] ),
-             FactData[Topic] = "Life KPIs", FactData[LK Table] = "NBV Margin",
+             FactData[Topic] = "Life KPIs", FactData[LK Table] = "PVNBP",
              CONTAINSSTRING ( FactData[Item], "Total" ), FactData[Year] = yZ )
+VAR mgZ = DIVIDE ( nZ, pvZ )
 VAR gNB = CALCULATE ( SUM ( FactData[Value] ),
              REMOVEFILTERS ( FactData[LK Line], DimPeriod, FactData[Period], FactData[Year] ),
              FactData[Topic] = "Life KPIs", CONTAINSSTRING ( FactData[Item], "Guarantee-linked NB" ), FactData[Year] = yZ )
@@ -263,7 +332,7 @@ VAR L7 = IF ( NOT ISBLANK ( gIF ) && gIF <> 0, "Guarantee-linked mathematical re
 VAR rl    = SELECTEDVALUE ( FactData[LK Line] )
 VAR rTbl  = CALCULATE ( MAX ( FactData[LK Table] ), REMOVEFILTERS ( DimPeriod, FactData[Period], FactData[Year] ),
                 FactData[Topic] = "Life KPIs" )
-VAR isPct = rTbl = "NBV Margin" || CONTAINSSTRING ( rl, "(%)" ) || CONTAINSSTRING ( rl, "Guarantee-linked" )
+VAR isPct = CONTAINSSTRING ( rl, "(%)" ) || CONTAINSSTRING ( rl, "Guarantee-linked" )
             || CONTAINSSTRING ( rl, "Average Guarantee" )
 VAR rf    = IF ( isPct, "0.0%", fmt )
 VAR per   = CALCULATETABLE ( SUMMARIZE ( FactData, FactData[Year], FactData[Period] ),
@@ -287,7 +356,7 @@ IF ( rowSel, R1 & UNICHAR ( 10 ) & R2,
 >> 4 матрицы, у всех: Righe LK Line; Colonne DimPeriod[Period]; Valori LK Value;
 >>   Totali: Disattivato. Фильтр визуала LK Table =
 >>   1) NBV             (заголовок "NBV")
->>   2) NBV Margin      (заголовок "NBV / PVNBP (IFRS 17)")
+>>   2) PVNBP           (заголовок "NBV / PVNBP (IFRS 17)"; в Valori ВМЕСТО LK Value -> LK Margin)
 >>   3) NB Guarantees   (заголовок "NB Guarantees - on NB Premiums")
 >>   4) IF Guarantees   (заголовок "IF Guarantees - on Mathematical Reserves")
 >> + Comment box: LK Comment (клик по строке -> ряд по годам и изменение).
