@@ -1,3 +1,4 @@
+
     EntOf = (h) =>
         let p0 = P0Of(h),
             Rws    = List.Select(List.Numbers(h, 7, -1), (r) => r >= 0),
@@ -7,12 +8,12 @@
                          (r) => List.Transform(cols, (c) => Txt(Rows{r}{c})))), f), null),
             Lc = List.Reverse(List.Select(WinCols, (c) => c < p0)),
             Oc = List.Select(WinCols, (c) => c >= p0),
-            Ac = List.Numbers(0, NC),
-            Hits = { Find(Lc, IsComp), Find(Oc, IsComp), Find(Ac, IsComp),
-                     Find(Lc, IsName), Find(Oc, IsName), Find(Ac, IsName) }
+            Nc = List.Reverse(List.Select(List.Numbers(C0 - 3, 3), (c) => c >= 0)),
+            Hits = { Find(Lc, IsComp), Find(Oc, IsComp), Find(Nc, IsComp),
+                     Find(Lc, IsName), Find(Oc, IsName), Find(Nc, IsName) }
         in List.First(List.RemoveNulls(Hits), null),
 
-
+        
 
 
 
