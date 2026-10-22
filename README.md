@@ -1,5 +1,5 @@
 let
-    T = Table.Distinct(Table.SelectColumns(FactData, {"Topic", "Item"})),
-    S = Table.Sort(T, {{"Topic", Order.Ascending}, {"Item", Order.Ascending}})
+    F  = Table.SelectRows(Files, each Text.Contains([Name], "Capital Deep Dive")),
+    Wb = Excel.Workbook(F{0}[Content], null, true)
 in
-    S
+    Wb
