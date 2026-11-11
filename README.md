@@ -1,143 +1,182 @@
-=====================================================================
+==================================================================
 
-=====================================================================
 
->> ЧТО ПОЛУЧИТСЯ
->>  - заголовки периодов красные, под ними красная линия
->>  - строки Total / Ratio: светло-красный фон, тёмно-красный шрифт
->>  - строки "o/w": серые, с отступом
->>  - колонка Actual текущего года подсвечена
->>  - отрицательные: красные в скобках; пустые: "-"
->> Ограничение: жирный шрифт по строкам через меры недоступен — выделяем цветом.
+#####################################################################
+ ШАГ 1. "KEY 3" ВМЕСТО НАЗВАНИЯ БЛОКА  (Power Query, FactData)
+#####################################################################
+>> Почему: на листе Non-Life Translation Framework слева от заголовка с периодами стоит
+>> служебная метка "KEY 3" (скорее всего в скрытой колонке). Парсер взял её как название
+>> блока — у обеих таблиц (итог и по компании) одно и то же имя.
 >>
->> ПЕРЕД НАЧАЛОМ должны быть сделаны:
->>  - колонки FactData[Line], [LineOrder], [BlockOrder] (хвост FactData в Power Query)
->>  - колонка PeriodSort и сортировка Period -> PeriodSort, Line -> LineOrder, Block -> BlockOrder
->>    (файл CPR_Fix_Sort_HTML, ШАГ 2)
-
-
-#####################################################################
- ШАГ 1. ОТСТУП ДЛЯ "o/w" (Power Query)
-#####################################################################
 >> Trasforma dati > FactData > Editor avanzato.
->> Найди строку, которая начинается с  LK3    =  (2 строки) и замени её на:
+>> 1) Найди строку, которая начинается с   WithKey  = Table.AddColumn(WithSrc, "LineKey", ...
+>> 2) ПЕРЕД ней вставь:
 
-    LK3    = Table.AddColumn(LK2, "Line", each
-                 let it  = if [Item] = null then "" else [Item],
-                     pad = if Text.StartsWith(Text.Lower(it), "o/w") or Text.StartsWith(it, "<")
-                           then Text.Repeat(Character.FromNumber(8194), 4) else ""
-                 in pad & it & Text.Repeat(Character.FromNumber(8203), [Dup]), type text),
+    FixBlk   = Table.ReplaceValue(WithSrc, each [Block], each
+                   if [Block] = null or Text.StartsWith(Text.Upper([Block]), "KEY")
+                   then (if [Topic] = "Non-Life TF by Company" then "LGAAP to IFRS17 bridge – by company"
+                         else if [Topic] = "Non-Life between LGAAP and IFRS" then "LGAAP to IFRS17 bridge – total"
+                         else [Topic])
+                   else [Block],
+                   Replacer.ReplaceValue, {"Block"}),
 
->> Fine > Chiudi e applica.
->> Проверка: в FactData[Line] строки "o/w ..." начинаются с небольшого отступа.
-
-
-#####################################################################
- ШАГ 2. МЕРЫ (Home > Nuova misura, папка "CPR Format")
-#####################################################################
-
->> Тип строки: 1 = Total/Ratio, 2 = o/w и <custom>, 0 = обычная, 3 = уровень блока
-
-Line Kind =
-VAR u = UPPER ( TRIM ( SUBSTITUTE ( SUBSTITUTE ( SELECTEDVALUE ( FactData[Line] ),
-            UNICHAR ( 8194 ), "" ), UNICHAR ( 8203 ), "" ) ) )
-RETURN SWITCH ( TRUE (),
-    NOT HASONEVALUE ( FactData[Line] ), 3,
-    LEFT ( u, 5 ) = "TOTAL" || CONTAINSSTRING ( u, "RATIO" ) || u IN { "RORC", "ROCE" }, 1,
-    LEFT ( u, 3 ) = "O/W" || LEFT ( u, 1 ) = "<", 2,
-    0 )
-
->> Значение ячейки: пусто -> 0, чтобы формат показал "-"
-
-CPR Cell = COALESCE ( [CPR Value], 0 )
-
->> ФОРМАТ для CPR Cell: выдели меру > Strumenti misura > Formato: Dinamico >
->> слева в строке формул выбери "Formato" и вставь:
+>> 3) В строке WithKey замени   Table.AddColumn(WithSrc,   на   Table.AddColumn(FixBlk,
+>> 4) Внизу окна: "Non sono stati rilevati errori di sintassi" > Fine > Chiudi e applica.
 >>
->>   IF ( MAX ( FactData[RatioFlag] ) = 1, "0.0%;-0.0%;-", "#,##0;(#,##0);-" )
-
->> Цвет фона ячейки
-
-Cell BG =
-VAR k    = [Line Kind]
-VAR isCY = SELECTEDVALUE ( FactData[PeriodType] ) = "Actual"
-           && SELECTEDVALUE ( FactData[Year] ) = [CPR Year]
-RETURN SWITCH ( TRUE (),
-    k = 1 && isCY, "#EBD3D1",
-    k = 1,         "#F2E3E2",
-    isCY,          "#FBF3F2",
-    "#FFFFFF" )
-
->> Цвет шрифта ячейки
-
-Cell Font =
-VAR v = [CPR Value]
-VAR k = [Line Kind]
-RETURN SWITCH ( TRUE (),
-    NOT ISBLANK ( v ) && v < 0, "#A50E0E",
-    k = 1, "#7A0F0C",
-    k = 2, "#6E6E6E",
-    "#333333" )
-
->> Для матрицы Performance (Act CY / Fcst CY / Var ...) — тот же фон без подсветки колонки:
-
-Row BG = IF ( [Line Kind] = 1, "#F2E3E2", "#FFFFFF" )
+>> Результат: два блока "LGAAP to IFRS17 bridge – total" и "... – by company".
+>> Любое другое "KEY..." на других листах тоже заменится на название Topic.
+>> Тексты в кавычках можно поменять на свои; условия [Topic] = "..." не трогать.
 
 
 #####################################################################
- ШАГ 3. МАТРИЦА "КАК В EXCEL"
+ ШАГ 2. ПУСТЫЕ СТРАНИЦЫ (слайсер Entity синхронизирован)
 #####################################################################
->> 1) ПОЛЯ
->>      Righe:   FactData[Block] > FactData[Line]
->>      Colonne: FactData[Period]
->>      Valori:  CPR Cell   (вместо CPR Value)
->>      В Righe: стрелка у Line > "Mostra elementi senza dati" = On
->>      (видны все строки шаблона, пустые = "-")
+>> Почему: на BU-листах нет "Company #" (Entity пустой), а слайсер Entity
+>> синхронизирован со всеми страницами и держит выбор Company #1 -> всё отфильтровано.
 >>
->> 2) УСЛОВНОЕ ФОРМАТИРОВАНИЕ (Formato > Elementi visivi cella > Serie: CPR Cell)
->>      Colore sfondo   On > fx > Formatta in base a: Valore campo > Campo: Cell BG
->>      Colore carattere On > fx > Formatta in base a: Valore campo > Campo: Cell Font
+>> 1) Visualizza > Sincronizza filtri dei dati (откроется панель).
+>> 2) Выдели слайсер Entity на любой странице.
+>> 3) В панели СНИМИ обе галочки (Sincronizza и Visibile) у страниц:
+>>      Total Distributions BU, Local GAAP Details, Holding LGAAP,
+>>      Profitability Ratios BU, Own Funds / OF Capital Generation Items,
+>>      Non-Life Translation Framework*
+>> 4) На этих страницах удали сам слайсер Entity (если остался).
 >>
->> 3) ФОРМАТ ВИЗУАЛА
->>      Stile predefinito ........ Nessuno (иначе тема перекрасит фон)
->>      Layout ................... Struttura; Rientro struttura 15
->>      Subtotali righe/colonne .. Off
->>      Icone +/- ................ Off; затем правый клик по матрице > Espandi > Tutto
->>      Intestazioni colonna ..... фон #FFFFFF; testo #A50E0E; Segoe UI Semibold 10;
->>                                 allineamento: a destra
->>      Griglia > Bordi .......... Sezione: Intestazione colonna; Posizione: In basso;
->>                                 colore #C21B17; larghezza 2
->>      Griglia orizzontale ...... On, colore #E3E3E3, 1 px
->>      Griglia verticale ........ Off
->>      Intestazioni riga ........ testo #333333, Segoe UI 9;
->>                                 "+/-" off; Блок (верхний уровень) — Segoe UI Semibold, #A50E0E
->>                                 (если в твоей версии есть "Applica impostazioni a: Livello 1")
->>      Valori ................... Segoe UI 9; allineamento a destra
->>      Titolo ................... Off (название листа — отдельным текстбоксом сверху)
+>> * Non-Life Translation Framework: правая таблица "by company" имеет Company #.
+>>   Если хочешь выбирать компанию — оставь слайсер, НО:
+>>   слайсер > Formato > Modifica interazioni > на ЛЕВОЙ матрице (total) значок "Nessuna".
 >>
->> 4) МАТРИЦА PERFORMANCE рядом (Act CY | Fcst CY | Delta vs Fcst | Var vs Fcst | Var vs PY):
->>      те же поля Righe, те же настройки формата;
->>      Colore sfondo для каждого значения: Valore campo > Row BG;
->>      Colore carattere для Var vs Fcst: Regole: < 0 #A50E0E, > 0 #2E7D32.
+>> Проверка: Own Funds и Profitability Ratios BU должны показать строки.
+>> Если Own Funds всё ещё пустой — пришли фото: возможно, у этого листа есть Company #.
 
 
 #####################################################################
- ШАГ 4. ПЕРЕНЕСТИ НА ВСЕ СТРАНИЦЫ
+ ШАГ 3. ФИЛЬТРЫ TOPIC НА СТРАНИЦАХ
 #####################################################################
->> Выдели готовую матрицу > Home > Copia formato (кисть) > клик по матрице на другой странице.
->> Условное форматирование кистью НЕ копируется в некоторых версиях: тогда проще
->> скопировать саму матрицу (Ctrl+C / Ctrl+V) на другую страницу — фильтр страницы
->> (Topic) сам поменяет содержимое.
+>> Filtri in questa pagina > Topic. Сверь с таблицей:
+>>
+>>  Вкладка                          Topic (Filtri in questa pagina)
+>>  -------------------------------  -----------------------------------------------------
+>>  Total Distributions BU           Total Distributions BU
+>>  Solvency II Entity               Solvency II
+>>  Local Solvency Entity            Local Solvency
+>>  SST Entity                       SST
+>>  Holding Entity                   Holding
+>>  Other Sect. Solvency Entity      Other Sectoral
+>>  Local GAAP Details               Local GAAP Total + Local GAAP Life + Local GAAP Non-Life
+>>  IFRS Details                     IFRS
+>>  Holding LGAAP                    Local LGAAP              <- было Local GAAP Total
+>>  Non-Life Translation Framework   Non-Life between LGAAP and IFRS + Non-Life TF by Company
+>>  Profitability Ratios BU          BU Profitability
+>>  Profitability Ratios LEs         Profitability Ratios
+>>  ORMT Impacts                     ORMT
+>>  Solvency AoM                     Solvency II AoM
+>>  OF Capital Generation Items      Own Funds
+>>  Sensitivities                    Sensitivities
+>>
+>> ДВЕ ТАБЛИЦЫ НА ОДНОЙ СТРАНИЦЕ:
+>>  - Local GAAP Details: в Righe поставь FactData[Topic] > Block > Line
+>>    (Total / Life / Non-Life будут отдельными группами).
+>>  - Non-Life Translation Framework: ЛИБО Righe = Topic > Block > Line в одной матрице,
+>>    ЛИБО две матрицы с фильтром визуала (Filtri in questo oggetto visivo > Topic):
+>>      левая  = Non-Life between LGAAP and IFRS
+>>      правая = Non-Life TF by Company
+>>
+>> ORMT Impacts: Righe = FactData[Section] > FactData[Line]  (группы <ORMT #1>, <ORMT #2>).
+
+
+#####################################################################
+ ШАГ 4. ПОРЯДОК КОЛОНОК И СТРОК КАК В EXCEL
+#####################################################################
+>> Сейчас: Actual 2025 | Actual 2026 | Forecast 2026 и строки по алфавиту (на Solvency II
+>> даже обратном: Tier III, Tier II ...). Нужна сортировка по колонке.
+>>
+>> 4a) Если колонки PeriodSort нет: Visualizzazione dati > FactData > Nuova colonna:
+
+PeriodSort =
+FactData[Year] * 10
+    + SWITCH ( FactData[PeriodType], "Forecast", 1, "Half-Year", 2, "Actual", 3, "Plan", 6, 9 )
+
+>> 4b) Visualizzazione dati > FactData > клик по заголовку колонки >
+>>     Strumenti colonna > Ordina per colonna:
+>>        Period -> PeriodSort
+>>        Line   -> LineOrder
+>>        Block  -> BlockOrder
+>>     Ошибка "più valori per lo stesso valore" -> пришли фото, какая колонка.
+>>
+>> 4c) В КАЖДОЙ матрице: "..." (вверху визуала) > Ordina asse > Line > Crescente.
+>>     (если стоит сортировка по Block — тоже Crescente)
+
+
+#####################################################################
+ ШАГ 5. BU Line (если ещё не заменила)
+#####################################################################
+>> На старых фото в BU Line ещё "VAR rows" — это зарезервированное слово, мера в ошибке,
+>> из-за неё падают BU Executive Summary и Summary BU. Замени формулу BU Line целиком:
+
+BU Line =
+VAR tR = ADDCOLUMNS ( FILTER ( SummaryIndex, SummaryIndex[ByCompany] ), "@s", [CPR Status] )
+VAR n  = COUNTROWS ( FILTER ( tR, [@s] IN { 1, 2, 3 } ) ) + 0
+VAR g  = COUNTROWS ( FILTER ( tR, [@s] = 1 ) ) + 0
+VAR rl = CONCATENATEX ( FILTER ( tR, [@s] = 3 ), SummaryIndex[Section], ", ", SummaryIndex[Order], ASC )
+VAR al = CONCATENATEX ( FILTER ( tR, [@s] = 2 ), SummaryIndex[Section], ", ", SummaryIndex[Order], ASC )
+VAR sr = CALCULATE ( [Key Act CY], SummaryIndex[Topic] = "Solvency II" )
+RETURN IF ( n > 0,
+    IF ( NOT ISBLANK ( sr ), "SII ratio " & FORMAT ( sr, "0%" ) & " · ", "" )
+    & g & " of " & n & " in line"
+    & IF ( rl <> "", " · Action: " & rl, "" )
+    & IF ( al <> "", " · Explain: " & al, "" ) )
+
+
+#####################################################################
+ ШАГ 6. ДИЗАЙН (по желанию, но сильно улучшает вид)
+#####################################################################
+>> 6a) Заголовки страниц: убрать "Executive Summary" у SST / Holding / Other Sectoral
+>>     (это страницы листов). Писать как в Excel: "SST Entity", "Holding Entity" ...
+>>
+>> 6b) Раскладка (страница 1280 x 720, одинаково на всех страницах):
+>>
+>>   ┌──────────────────────────────────────────────────────────────────────┐
+>>   │ ШАПКА 0,0  1280x56 #7A0F0C: название листа (белый, 18) + CPR Subtitle  │
+>>   │                      справа слайсер Entity (Elenco a discesa)          │
+>>   ├───────────────────────────────────────────┬──────────────┬───────────┤
+>>   │ МАТРИЦА "как в Excel"                       │ ОТКЛОНЕНИЯ    │ KEY       │
+>>   │ X 16, Y 72, W 640, H 632                    │ X 664 W 300   │ MESSAGES  │
+>>   │ Block > Line | Period | CPR Cell             │ Δ vs Fcst     │ X 972     │
+>>   │                                              │ Var vs Fcst   │ W 292     │
+>>   │                                              │ Var vs PY     │ CPR Comm. │
+>>   └───────────────────────────────────────────┴──────────────┴───────────┘
+>>
+>>   - Матрица отклонений: убери Act CY и Act PY (они уже есть слева).
+>>   - Key messages: белый прямоугольник + красная полоса слева 4 px #C21B17 +
+>>     заголовок "Key messages" (Segoe UI Semibold 11, #C21B17) + карточка CPR Comment.
+>>   - Слайсер Entity: Stile Elenco a discesa, без синей заливки
+>>     (Formato > Valori > Sfondo: белый; Intestazione: "Entity", #A50E0E).
+>>
+>> 6c) Матрицы:
+>>   - Шрифт: Valori и Intestazioni riga 10 (сейчас ~8, мелко).
+>>   - Intestazioni riga: Block — Segoe UI Semibold, #A50E0E.
+>>   - Строки Total/Ratio: в мере Cell BG поменяй "#F2E3E2" на "#EED5D3" (ярче),
+>>     в Cell Font для k = 1 оставь "#7A0F0C".
+>>   - Обе матрицы: одинаковая Spaziatura righe (Formato > Griglia), тогда строки
+>>     слева и справа стоят на одном уровне.
+>>
+>> 6d) Шаблонные строки (<Other driver #1>, [custom to specify] ...):
+>>     пока данные dummy — оставить. Когда будут реальные данные: в Righe у Line
+>>     выключи "Mostra elementi senza dati" — останутся только заполненные строки.
+>>
+>> 6e) Сделай ОДНУ страницу по 6b–6c, потом скопируй шапку, матрицы и Key messages
+>>     на остальные (Ctrl+C / Ctrl+V встают на те же координаты) и поменяй только
+>>     фильтр Topic и название.
 
 
 #####################################################################
  ПРОВЕРКА
 #####################################################################
->> [ ] Колонки: Actual 2025 | Forecast 2026 | Actual 2026 | (Plan 2027)
->> [ ] Строки в порядке Excel, блоки в порядке Excel
->> [ ] "Total Remittance ...", "Solvency Ratio (%)", "RoRC" — светло-красный фон
->> [ ] "o/w ..." — серые с отступом
->> [ ] Колонка Actual 2026 слегка подсвечена
->> [ ] Пустые ячейки "-", отрицательные (123) красным
->> [ ] Строка Total не подсветилась -> её слово добавь в Line Kind в ветку "= 1"
->> [ ] Ошибка -> фото жёлтой строки под формулой
+>> [ ] Non-Life Translation Framework: два блока вместо "KEY 3"
+>> [ ] Local GAAP Details, Profitability Ratios BU, Own Funds, Holding LGAAP показывают строки
+>> [ ] Holding LGAAP: строки "Revenue from participations / Expenses / Operating result"
+>> [ ] Колонки: Actual 2025 | Forecast 2026 | Actual 2026 | Plan 2027
+>> [ ] Строки и блоки в порядке Excel на всех страницах
+>> [ ] BU Line без ошибки, Summary BU работает
+>> [ ] Пришли 2–3 скриншота
