@@ -1,6 +1,63 @@
 
 =====================================================================
 
+=== ОБНОВЛЕНИЕ 16.11: ИСТОЧНИК НАЙДЕН ===
+CP-Tool 27-29_MASTER_v2.3 -> лист "Capital Generation Items"
+Коды в колонке A, FY25 Actual = G (7-я колонка), FY26 Forecast = H (8-я).
+Коды совпадают 1:1:
+  CPR C9  SII_OFM_CPGEN_L_VNP_PVFP_GRS  = CP-Tool строка 26
+  CPR C10 SII_OFM_CPGEN_L_VNP_RM_GRS    = CP-Tool строка 27
+  CPR C12 SII_OFM_CPGEN_NL_CYBER_GRS    = CP-Tool строка 39
+  CPR C13 SII_OFM_CPGEN_NL_DISC         = CP-Tool строка 38
+  Life SII VNP (gross) = CP-Tool строка 25, без кода = подытог 26+27 (как F8 у нас)
+
+!! Индексы 3/4 в строке 2 CPR НЕ совпадают с G/H (7/8) -> не хардкодить индекс,
+   искать колонку по заголовку (формула ниже).
+
+ФОРМУЛА СО ССЫЛКОЙ НА ДРУГОЙ ФАЙЛ (F9, протянуть на G, строки 10/12/13):
+IT: =SE.ERRORE(INDICE('[CP-Tool 27-29_MASTER_v2.3.xlsm]Capital Generation Items'!$A$1:$Z$300;
+      CONFRONTA($C9;'[CP-Tool 27-29_MASTER_v2.3.xlsm]Capital Generation Items'!$A$1:$A$300;0);
+      CONFRONTA(F$1;'[CP-Tool 27-29_MASTER_v2.3.xlsm]Capital Generation Items'!$1:$1;0));0)
+  (всё в одну строку; переносы тут только для читаемости)
+  - расширение .xlsm или .xlsx - проверь (баннер про макросы -> скорее .xlsm)
+  - F1="FY25", G1="FY26"; $1:$1 = строка CP-Tool с "FY25"/"FY26" - проверь номер
+  - не вводить путь руками: набери =, переключись в окно CP-Tool, кликни ячейку -
+    Excel сам вставит имя/путь. Когда CP-Tool закрыт, Excel покажет полный путь
+    'C:\...\[CP-Tool 27-29_MASTER_v2.3.xlsm]Capital Generation Items'!...
+  - INDICE/CONFRONTA и CERCA.VERT работают с ЗАКРЫТЫМ файлом;
+    SOMMA.PIÙ.SE с закрытым файлом даёт #VALORE! -> вариант C только при открытом источнике
+  - диапазоны ограничены ($A$1:$Z$300), а не целые колонки: с внешним файлом быстрее
+  - новая версия (v2.4): Dati -> Modifica collegamenti -> Cambia origine
+    -> все формулы переключаются разом
+
+<SRC> в формулах ниже = "source", место для ссылки на лист-источник (не SCR!).
+
+РЕКОМЕНДУЕМАЯ ФОРМУЛА, ОБЩИЙ ВИД (F9, протянуть на G, строки 10/12/13):
+IT: =SE.ERRORE(INDICE(<SRC>!$A:$Z;CONFRONTA($C9;<SRC>!$A:$A;0);CONFRONTA(F$1;<SRC>!$1:$1;0));0)
+EN: =IFERROR(INDEX(<SRC>!$A:$Z;MATCH($C9;<SRC>!$A:$A;0);MATCH(F$1;<SRC>!$1:$1;0));0)
+  F1 = "FY25", G1 = "FY26" (впиши ровно как в заголовке источника);
+  $1:$1 = строка источника, где стоят "FY25","FY26" (проверь номер строки).
+  Колонки ищутся по заголовку -> переживает добавление/сдвиг колонок.
+
+<SRC> - НЕ ссылаться напрямую на файл CP-Tool:
+  - CP-Tool = шаблон ОДНОЙ компании (ячейка "Please select the company IFICC")
+  - MASTER пустой (везде 0,0), файл read-only, версия v2.3 сменится -> ссылки сломаются
+  ЛУЧШЕ: лист "IN_CapGen" внутри CPR, куда вставляются значения
+  (Incolla valori) из CP-CoRE / CP-Tool нужной компании, с той же раскладкой
+  (коды в A, FY25/FY26 в заголовке строки 1). Формулы смотрят на него.
+  Спросить коллегу: CPR - по одной компании или по многим? Если по многим ->
+  в IN_CapGen добавить колонку Entity и перейти на SOMMA.PIÙ.SE (вариант C).
+
+КАНДИДАТЫ НА ДОПОЛНЕНИЕ (есть в том же листе CP-Tool, полезны для review):
+  SII_OFM_L_PVNBP          PVNBP (IFRS 17)            -> NBV margin = VNP / PVNBP
+  SII_OFM_CPGEN_L_VNP_*_NET Life SII VNP net of tax   -> + Life implicit tax rate
+  SII_OFM_CPGEN_NL_CYBER_NET NL CY result net of tax  -> + Non-life implicit tax rate
+  SII_OFM_CPGEN_NL_RM      Delta non-life risk margin
+  SII_OFM_NL_COR_DISC / _UNDISC  CoR IFRS 17           -> ключевой KPI Non-Life
+  SII_OFM_L_NBV_GRS ... _TAX  Reconciliation NBV official -> SII VNP (строки 11-18)
+  Приоритет: CoR и NBV margin (самые "performance"), потом net/tax, reconciliation - опц.
+=========================================
+
 Excel у тебя на итальянском -> в формулах ";" и итальянские функции.
 Каждая формула дана в двух вариантах: IT (вставлять) и EN (для понимания).
 
