@@ -1,58 +1,19 @@
-    IsCodeTxt = (t as text) as logical =>
-                  Text.Length(t) = 5
-                  and List.AllTrue(List.Transform(Text.ToList(Text.Start(t, 2)), each _ >= "A" and _ <= "Z"))
-                  and List.AllTrue(List.Transform(Text.ToList(Text.End(t, 3)),   each _ >= "0" and _ <= "9")),
-    Cands     = List.Combine(List.Transform(List.FirstN(Raw, 6), (r) => List.Select(r, each _ is text))),
-    Hit       = List.First(List.Select(Cands, each IsCodeTxt(Text.Trim(Text.BeforeDelimiter(_, " - ")))), null),
-    IFICC     = if Hit <> null then Text.Trim(Text.BeforeDelimiter(Hit, " - ")) else fileName,
+    Countries = [AT="Austria", BE="Belgium", BG="Bulgaria", CH="Switzerland", CS="Serbia", RS="Serbia",
+                 CZ="Czech Republic", DE="Germany", ES="Spain", FR="France", GR="Greece", HR="Croatia",
+                 HU="Hungary", IE="Ireland", IT="Italy", LI="Liechtenstein", LU="Luxembourg", MC="Monaco",
+                 ME="Montenegro", NL="Netherlands", PL="Poland", PT="Portugal", RO="Romania", SI="Slovenia",
+                 SK="Slovakia", GB="United Kingdom", AR="Argentina", BR="Brazil", CL="Chile", EC="Ecuador",
+                 MX="Mexico", CO="Colombia", MY="Malaysia", PH="Philippines", IN="India", CN="China",
+                 HK="Hong Kong", TH="Thailand", ID="Indonesia", US="United States", AO="Angola", TR="Turkey"],
+    Ccy       = [CH="CHF", LI="CHF", CS="RSD", RS="RSD", CZ="CZK", HU="HUF", PL="PLN", RO="RON",
+                 GB="GBP", AR="ARS", BR="BRL", CL="CLP", EC="USD", MX="MXN", CO="COP", MY="MYR",
+                 PH="PHP", IN="INR", CN="CNY", HK="HKD", TH="THB", ID="IDR", US="USD", AO="AOA", TR="TRY"],
+    SII       = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT",
+                 "LU","MT","NL","PL","PT","RO","SK","SI","ES","SE","NO","IS","LI"},
 
-
-
-
-
-
-
-= Table.Distinct(Table.SelectColumns(CP_Data, {"IFICC", "File", "Modified"}))
-
-
-
-
-
-
-
-
-
-
-let
-    Sites    = { "https://generali.sharepoint.com/sites/GCSC" },
-    AllFiles = Table.Combine(List.Transform(Sites, each SharePoint.Files(_, [ApiVersion = 15]))),
-    Files    = Table.SelectRows(AllFiles, each
-                 Text.Contains([Name], "CP-Tool 27-29")
-                 and List.Contains({".xlsx", ".xlsm"}, Text.Lower([Extension]))
-                 and not Text.StartsWith([Name], "~$")),
-    Res      = Table.AddColumn(Files, "Res", each try fnCPTool([Content], [Name])),
-    Status   = Table.AddColumn(Res, "Status", each if [Res][HasError] then [Res][Error][Message] else "OK", type text),
-    OK       = Table.SelectRows(Status, each [Status] = "OK"),
-    Data     = Table.AddColumn(OK, "T", (row) =>
-                 Table.AddColumn(
-                   Table.AddColumn(row[Res][Value], "Modified", each row[Date modified], type datetime),
-                   "Source", each row[Folder Path], type text)),
-    Comb     = Table.Combine(Data[T]),
-
-    // по каждой компании — только самый свежий файл
-    MaxMod   = Table.Group(Comb, {"IFICC"}, {{"MaxMod", each List.Max([Modified]), type datetime}}),
-    J        = Table.ExpandTableColumn(Table.NestedJoin(Comb, {"IFICC"}, MaxMod, {"IFICC"}, "M", JoinKind.Inner), "M", {"MaxMod"}),
-    Latest   = Table.SelectRows(J, each [Modified] = [MaxMod]),
-    Dedup    = Table.Distinct(Latest, {"IFICC", "Item"}),
-    Out      = Table.RemoveColumns(Dedup, {"MaxMod"})
-in
-    Out
-
-
-
-
-
-
-
-
-
+    WithCtry  = Table.AddColumn(WithCC, "Country", each Record.FieldOrDefault(Countries, [Country Code], [Country Code]), type text),
+    WithCcy   = Table.AddColumn(WithCtry, "Currency", each Record.FieldOrDefault(Ccy, [Country Code], "EUR"), type text),
+    Final     = Table.AddColumn(WithCcy, "Regime", each
+                  if List.Contains(SII, [Country Code]) then "Solvency II"
+                  else if List.Contains({"CH"}, [Country Code]) then "SST (CH)"
+                  else "Non-SII", type text)
