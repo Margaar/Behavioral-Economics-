@@ -433,3 +433,18 @@ End Function
  [ ] Страницы без маппинга (SAA, Debt, Initiatives, HMS, Local RAF...) будут
      пустыми при DataSource = CP-Tool — для них оставить CDD (DataSource = Both).
 =====================================================================
+
+
+
+
+
+
+
+
+
+
+    Sheets1 = if sheetFilter = null then Sheets0
+              else Table.SelectRows(Sheets0, each List.Contains(sheetFilter, [Name])),
+    // #VALUE!, #N/A, #DIV/0! -> пустая ячейка
+    Sheets  = Table.TransformColumns(Sheets1, {{"Data", (t) =>
+                Table.ReplaceErrorValues(t, List.Transform(Table.ColumnNames(t), (c) => {c, null}))}}),
